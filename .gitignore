@@ -218,3 +218,22 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# tokamaksi: no data, ever. Labels and signals are fetched by the user; the tests
+# build a synthetic release at test time. Anchored so package data under
+# src/tokamaksi/data/ (a small catalogue, no records) is not swallowed.
+*.parquet
+*.h5
+*.hdf5
+*.npz
+*.npy
+*.pkl
+*.pt
+*.ckpt
+*.jsonl
+*.csv
+/data/
+/releases/
+/hf_cache/
+.tokamaksi.json
+!src/tokamaksi/data/
