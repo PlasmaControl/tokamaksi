@@ -15,6 +15,14 @@ def test_parse_specs():
         signals.parse("bolo:x")
 
 
+@pytest.mark.parametrize(
+    "spec", [3, None, ("bolo",), ("bolo", "x"), ("bolo", [0, "x"]), ("bolo", 1, 2)]
+)
+def test_a_malformed_spec_is_a_value_error_naming_it(spec):
+    with pytest.raises(ValueError, match="bad signal spec"):
+        signals.parse(spec)
+
+
 def test_read_gives_ms_and_the_asked_channels(corpus):
     trace = signals.read(900001, "bolo:1,2", corpus=corpus)
     assert (

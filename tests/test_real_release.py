@@ -25,3 +25,20 @@ def test_a_real_release_opens_and_loads():
     gold = tk.shotlists.gold(rel)
     shot = tk.load_grid("gold", release=rel).decode(int(gold.shot.iloc[0]))
     assert shot.frames.dtype.name == "int8" and shot.frames.shape[1] > 0
+
+
+@pytest.mark.skipif(not PATH, reason="TOKAMAKSI_TEST_RELEASE is not set")
+def test_every_category_of_the_real_taxonomy_has_a_fixed_plot_colour():
+    # A category added in a later release must get a colour in plot.CATEGORY_COLOURS
+    # (or be one the plot leaves hatched), not a fallback that depends on the figure.
+    pytest.importorskip("matplotlib")
+    from tokamaksi import plot
+
+    taxonomy = tk.open_release(PATH).taxonomy()
+    missing = {
+        (event, name)
+        for event in taxonomy.events
+        for name in taxonomy.categories(event).values()
+        if not plot._not_assessed(name) and name not in plot.CATEGORY_COLOURS
+    }
+    assert not missing, sorted(missing)

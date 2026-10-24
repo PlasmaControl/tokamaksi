@@ -72,7 +72,8 @@ def parse(spec: str | tuple) -> tuple[str, tuple[int, ...] | None]:
     """A signal spec as `(group, channels)`; channels None means every channel.
 
     `"filterscopes"` (every channel), `"filterscopes:3"`, `"filterscopes:0,2,5"`,
-    `("filterscopes", 3)` and `("filterscopes", [0, 2])` are all accepted.
+    `("filterscopes", 3)` and `("filterscopes", [0, 2])` are all accepted; anything
+    else raises `ValueError` naming the spec.
     """
     if isinstance(spec, str):
         group, _, rest = spec.partition(":")
@@ -84,10 +85,22 @@ def parse(spec: str | tuple) -> tuple[str, tuple[int, ...] | None]:
             raise ValueError(
                 f"bad signal spec {spec!r}: expected group or group:i,j"
             ) from None
+    bad = ValueError(
+        f"bad signal spec {spec!r}: expected 'group', 'group:i,j' or (group, channels)"
+    )
+    if not isinstance(spec, (tuple, list)) or len(spec) != 2:
+        raise bad
     group, channels = spec
+    if not isinstance(group, str) or isinstance(channels, str):
+        raise bad
     if isinstance(channels, (int, np.integer)):
         channels = [channels]
-    return str(group), None if channels is None else tuple(int(c) for c in channels)
+    if channels is None:
+        return group, None
+    try:
+        return group, tuple(int(c) for c in channels)
+    except (TypeError, ValueError):
+        raise bad from None
 
 
 def available(

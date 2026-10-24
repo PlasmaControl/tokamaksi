@@ -136,6 +136,8 @@ def test_timeline_alone(rel):
         ("Unassessed", True),
         ("unmarked (not assessed)", True),
         ("not_observable", True),
+        ("not observable", True),
+        ("Not  Observable", True),
         ("absent", False),
         ("uncertain", False),
         ("uncertain (segment below the confidence floor)", False),
@@ -232,7 +234,15 @@ def test_a_producers_suffix_does_not_change_a_category_colour(rel):
     assert boxes[(0, 500.0)] == plot.CATEGORY_COLOURS["low"].lower()  # `low (L)`
     legend = fig.legends[0]
     names = [t.get_text() for t in legend.get_texts()]
-    assert names == ["unassessed", "qh", "wpqh", "high", "low", "uncertain"]
+    # `qh (QH)` is an abbreviation and adds nothing; the reason after `uncertain` stays.
+    assert names == [
+        "unassessed",
+        "qh",
+        "wpqh",
+        "high",
+        "low",
+        "uncertain (segment below the confidence floor)",
+    ]
     swatches = [to_hex(p.get_facecolor()).lower() for p in legend.get_patches()[1:]]
     assert len(set(swatches)) == len(swatches)  # no two entries share a colour
 
@@ -348,3 +358,231 @@ def test_signals_given_as_a_tuple_of_strings_stack(rel, corpus):
         t_range=(0, 2000),
     )
     assert pair.axes[0].get_ylabel() == "bolo[0,2]" and len(pair.axes) == 2
+
+
+def _frame(event, *rows, tier="derived", layer="extend"):
+    """Labels of one shot as `load_labels` gives them: `(category, name, start, stop)`."""
+    return pd.DataFrame(
+        [
+            {
+                "shot": 900100,
+                "event": event,
+                "category": category,
+                "category_name": name,
+                "t_start_ms": float(start),
+                "t_end_ms": float(stop),
+                "kind": "unspecified",
+                "tier": tier,
+                "layer": layer,
+                "dataset": f"{event}/{layer}/made_up",
+                "method": "made_up",
+                "version": "",
+            }
+            for category, name, start, stop in rows
+        ]
+    )
+
+
+def _legend(obj):
+    """The legend entries of a figure (`plot.shot`) or of an Axes (`plot.timeline`)."""
+    legend = obj.legends[0] if hasattr(obj, "legends") else obj.get_legend()
+    return [t.get_text() for t in legend.get_texts()]
+
+
+def test_category_zero_of_confinement_outside_the_owners_save_is_not_assessed(rel):
+    # 900004's source draft says category 0 `absent` on 0-900 ms, but the release
+    # reads that as "nothing marked" (taxonomy zero: the owner saved no regime here).
+    fig = plot.shot(900004, ["confinement"], tier=["source", "derived"], release=rel)
+    ax = _label_axes(fig)
+    boxes = _boxes(ax)  # the source row is row 1 from the bottom
+    assert (1, 0.0) not in boxes and (1, 900.0) in boxes
+    assert plot.CATEGORY_COLOURS["absent"].lower() not in boxes.values()
+    assert len(_hatched(ax)) == 2  # one hatch per row, nothing painted over 0-900
+    assert "absent" not in _legend(fig)
+
+
+def test_zero_in_the_owners_save_is_painted_with_the_taxonomys_words(rel):
+    fig = plot.shot(900004, ["confinement"], tier="reviewed", release=rel)
+    ax = _label_axes(fig)
+    assert _boxes(ax)[(0, 1500.0)] == plot.CATEGORY_COLOURS["absent"].lower()
+    words = rel.taxonomy().zero("confinement")
+    assert words == "the owner saved no regime here"
+    assert _legend(fig) == ["unassessed", words, "high"]  # not `absent`
+    # The same rows read from any other table are unassessed again.
+    taxonomy = rel.taxonomy()
+    labels = tk.load_labels("confinement", tier="reviewed", shots=900004, release=rel)
+    other = labels.assign(tier="original", layer="format")
+    assert (0, 1500.0) not in _boxes(plot.timeline(other, taxonomy=taxonomy))
+    assert (0, 1700.0) in _boxes(plot.timeline(other, taxonomy=taxonomy))
+
+
+def test_zero_that_means_absent_is_painted_in_every_tier(rel):
+    # An ELM 0 is "assessed, not seen" wherever it comes from; the taxonomy says so.
+    labels = tk.load_labels("edge_localized_mode", shots=900001, release=rel)
+    assert rel.taxonomy().zero("edge_localized_mode").startswith("absent")
+    for tier, layer in (("source", "source"), ("derived", "extend")):
+        ax = plot.timeline(
+            labels.assign(tier=tier, layer=layer), taxonomy=rel.taxonomy()
+        )
+        assert _boxes(ax)[(0, 0.0)] == plot.CATEGORY_COLOURS["absent"].lower()
+        assert "absent" in _legend(ax)
+    # Without a taxonomy there is nothing to say a 0 means less: it is painted.
+    assert (0, 0.0) in _boxes(plot.timeline(labels.assign(tier="source")))
+
+
+@pytest.mark.parametrize(
+    "key, name, expected",
+    [
+        ("high", "high", "high"),
+        ("high", "high (H)", "high"),
+        ("low", "low (L)", "low"),
+        ("qh", "qh (QH)", "qh"),
+        ("wpqh", "wpqh (WPQH)", "wpqh"),
+        ("high", "High", "high"),
+        ("marfe", "marfe (candidate)", "marfe (candidate)"),
+        (
+            "uncertain",
+            "uncertain (segment below the confidence floor)",
+            "uncertain (segment below the confidence floor)",
+        ),
+        ("low", "something else", "something else"),
+    ],
+)
+def test_the_legend_keeps_a_producers_qualifier(key, name, expected):
+    assert plot._legend_name(key, name) == expected
+
+
+def test_a_candidate_keeps_its_word_in_the_legend_with_the_colour_of_its_class():
+    labels = _frame(
+        "detachment",
+        (3, "marfe (candidate)", 0, 100),
+        (3, "marfe", 100, 200),
+        (2, "detached", 200, 300),
+    )
+    ax = plot.timeline(labels)
+    assert _legend(ax) == ["unassessed", "marfe (candidate)", "marfe", "detached"]
+    boxes = _boxes(ax)
+    assert (
+        boxes[(0, 0.0)] == boxes[(0, 100.0)] == plot.CATEGORY_COLOURS["marfe"].lower()
+    )
+
+
+def test_names_that_mean_not_assessed_are_found_by_the_taxonomy_too(rel):
+    # The raw name carries a suffix or a space, but the id is the taxonomy's
+    # not_observable: still hatch, still out of the legend.
+    labels = _frame(
+        "edge_localized_mode",
+        (3, "not_observable (ECE cutoff)", 0, 100),
+        (3, "not observable", 100, 200),
+        (1, "present", 200, 300),
+    )
+    ax = plot.timeline(labels, taxonomy=rel.taxonomy())
+    assert sorted(_boxes(ax)) == [(0, 200.0)]
+    assert _legend(ax) == ["unassessed or not observable", "present"]
+    # With no taxonomy the trailing parenthesis is dropped, which is enough here.
+    bare = plot.timeline(labels.iloc[[0]])
+    assert _boxes(bare) == {} and _legend(bare) == ["unassessed or not observable"]
+
+
+def test_q_min_hybrid_and_elevated_have_fixed_colours_in_a_ramp():
+    ramp = [plot.CATEGORY_COLOURS[n] for n in ("low", "hybrid", "elevated", "high")]
+    assert len({c.lower() for c in ramp}) == 4
+    assert all(c.lower() not in {f.lower() for f in plot.FALLBACK} for c in ramp)
+
+    # Colour-blind check: CIELAB distance after simulating protan, deutan and tritan
+    # vision (Machado et al. 2009, severity 1) between every pair of a q_min figure.
+    simulate = {
+        "protan": [[0.152286, 1.052583, -0.204868], [0.114503, 0.786281, 0.099216], [-0.003882, -0.048116, 1.051998]],
+        "deutan": [[0.367322, 0.860646, -0.227968], [0.280085, 0.672501, 0.047413], [-0.011820, 0.042940, 0.968881]],
+        "tritan": [[1.255528, -0.076749, -0.178779], [-0.078411, 0.930809, 0.147602], [0.004733, 0.691367, 0.303900]],
+    }  # fmt: skip
+    xyz = np.array(
+        [[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]]
+    )
+
+    def lab(colour, matrix):
+        rgb = np.array(to_rgb(colour))
+        linear = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
+        linear = np.clip(np.array(matrix) @ linear, 0, 1)
+        f = (xyz @ linear) / np.array([0.95047, 1.0, 1.08883])
+        f = np.where(f > 0.008856, np.cbrt(f), 7.787 * f + 16 / 116)
+        return np.array([116 * f[1] - 16, 500 * (f[0] - f[1]), 200 * (f[1] - f[2])])
+
+    shown = ramp + [plot.CATEGORY_COLOURS[n] for n in ("uncertain", "absent")]
+    for kind, matrix in simulate.items():
+        for i, one in enumerate(shown):
+            for other in shown[:i]:
+                gap = np.linalg.norm(lab(one, matrix) - lab(other, matrix))
+                assert gap > 15, (kind, one, other, gap)
+
+
+def test_a_figure_with_q_min_classes_uses_the_ramp():
+    labels = _frame(
+        "minimum_safety_factor",
+        (1, "low", 0, 100),
+        (2, "hybrid", 100, 200),
+        (3, "elevated", 200, 300),
+        (4, "high", 300, 400),
+    )
+    ax = plot.timeline(labels)
+    assert _legend(ax) == ["unassessed", "low", "hybrid", "elevated", "high"]
+    assert [to_hex(p.get_facecolor()).lower() for p in ax.get_legend().get_patches()][
+        1:
+    ] == [
+        plot.CATEGORY_COLOURS[n].lower() for n in ("low", "hybrid", "elevated", "high")
+    ]
+
+
+def test_fallback_colours_go_by_the_categorys_position_not_the_draw_order():
+    from tokamaksi.taxonomy import Taxonomy
+
+    taxonomy = Taxonomy(
+        {
+            "events": {
+                "newcomer": {
+                    "categories": {0: "absent", 1: "zz1", 2: "zz2", 3: "zz3", 4: "zz4"}
+                }
+            }
+        }
+    )
+
+    def colours(*rows):
+        ax = plot.timeline(_frame("newcomer", *rows), taxonomy=taxonomy)
+        patches = ax.get_legend().get_patches()
+        return dict(
+            zip(_legend(ax), (to_hex(p.get_facecolor()).lower() for p in patches))
+        )
+
+    first = colours((1, "zz1", 0, 10), (2, "zz2", 10, 20), (4, "zz4", 20, 30))
+    again = colours((4, "zz4", 0, 10), (3, "zz3", 10, 20), (2, "zz2", 20, 30))
+    assert first["zz2"] == again["zz2"] and first["zz4"] == again["zz4"]
+    assert len({first["zz1"], first["zz2"], first["zz4"], again["zz3"]}) == 4
+    assert first["zz1"] == plot.FALLBACK[1].lower()  # its position in the taxonomy
+    # The same class on its own is the same colour again.
+    assert colours((2, "zz2", 0, 10))["zz2"] == first["zz2"]
+
+
+def test_an_unknown_name_of_another_event_never_shares_a_colour_in_a_figure():
+    from tokamaksi.taxonomy import Taxonomy
+
+    taxonomy = Taxonomy(
+        {
+            "events": {
+                "first": {"categories": {0: "absent", 1: "yy1"}},
+                "second": {"categories": {0: "absent", 1: "ww1"}},
+            }
+        }
+    )
+    labels = pd.concat(
+        [_frame("first", (1, "yy1", 0, 10)), _frame("second", (1, "ww1", 0, 10))]
+    )
+    patches = plot.timeline(labels, taxonomy=taxonomy).get_legend().get_patches()
+    colours = [to_hex(p.get_facecolor()).lower() for p in patches]
+    assert len(set(colours)) == len(colours)  # same position, two names, two colours
+
+
+def test_a_bad_spec_in_a_list_is_named_before_anything_is_read(rel, corpus):
+    with pytest.raises(ValueError, match="bad signal spec 3"):
+        plot.shot(900001, signals=["bolo:0", 3], release=rel, corpus=corpus)
+    with pytest.raises(ValueError, match="bad signal spec"):
+        plot.shot(900001, signals=["bolo", 3], release=rel, corpus=corpus)

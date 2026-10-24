@@ -68,8 +68,10 @@ planned, not built.
 
 ## Read this before using the labels
 
-* Missing is not zero. A row with category 0 says "assessed, not seen"; time with no
-  row was never assessed (`-1` on the grid, hatched grey in plots). Rows named
+* Missing is not zero. A row with category 0 says "assessed, not seen", except where
+  `Taxonomy.zero(event)` says otherwise: category 0 of `confinement` and `detachment`
+  outside the owner's own save only says nothing was marked, so it is unassessed. Time
+  with no row was never assessed (`-1` on the grid, hatched grey in plots). Rows named
   `unassessed`, `unmarked (not assessed)` or `not_observable` count as not assessed
   too: the grid makes them -1 and plots leave them hatched.
 * `tier="reviewed"` are tables a person saved on the review page. Many saved ELM

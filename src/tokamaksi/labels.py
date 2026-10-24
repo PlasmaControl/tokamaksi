@@ -84,7 +84,9 @@ def load_labels(
     are half-open `[t_start_ms, t_end_ms)` on a 10 ms grid.
 
     Missing is not zero: time with no row was not assessed. A row of category 0 says
-    "assessed, not seen". `df.attrs["tokamaksi"]` records the release and the query.
+    "assessed, not seen", except where `Taxonomy.zero(event)` says otherwise: category
+    0 of `confinement` and `detachment` outside the owner's save is unassessed.
+    `df.attrs["tokamaksi"]` records the release and the query.
     Each reminder about a tier other than `reviewed`, and about the test split, is
     shown once per process as a `TermsWarning`.
     """

@@ -2,10 +2,12 @@
 
 Two rules the drawing never bends. Time nobody assessed is hatched grey: not white,
 and not the colour of category 0, which means "assessed, not seen". That includes
-rows whose category says so (`unassessed`, `unmarked (not assessed)`) and rows
-marked `not_observable`: the 10 ms grid makes all of them -1, so they are not drawn
-and the hatch shows through. A span (a stretch of activity) is a pale box with a
-coloured edge and an individual event is a dark-edged box with a triangle above its
+rows whose category says so (`unassessed`, `unmarked (not assessed)`), rows marked
+`not_observable`, and category 0 of an event whose 0 does not mean "absent"
+(`Taxonomy.zero`: confinement and detachment, where 0 only says nothing was marked)
+outside the owner's own save: the 10 ms grid makes all of them -1, so they are not
+drawn and the hatch shows through. A span (a stretch of activity) is a pale box with
+a coloured edge and an individual event is a dark-edged box with a triangle above its
 row, so the two differ by shape and not only colour.
 """
 
@@ -24,7 +26,8 @@ from .schema import GRID_MS, TIER_ORDER
 from .taxonomy import Taxonomy
 
 #: Okabe-Ito colours, keyed by the taxonomy's name of a category (`high`, not the
-#: `high (H)` a producer wrote); a name that is not here takes the next of `FALLBACK`.
+#: `high (H)` a producer wrote); a name that is not here takes a colour of `FALLBACK`.
+#: `test_real_release` fails when a release names a category that is not here.
 CATEGORY_COLOURS = {
     "present": "#0072B2",
     "uncertain": "#E69F00",
@@ -36,16 +39,23 @@ CATEGORY_COLOURS = {
     "attached": "#0072B2",
     "detached": "#D55E00",
     "marfe": "#F0E442",
+    # minimum_safety_factor is ordinal, low < hybrid < elevated < high: a ramp from
+    # `low` through light green and light blue to `high`. Any two of the ramp,
+    # `uncertain` and `absent` are over 15 CIELAB units apart under each of the three
+    # colour-vision deficiencies (tests/test_plot.py checks it).
+    "hybrid": "#B2DF8A",
+    "elevated": "#88CCEE",
     # Neutral, not blue: a span of "present" is a pale blue and must not be mistaken
     # for assessed-and-absent time.
     "absent": "#E3DCCB",
 }
-#: For names not above, in the order they are first drawn. None of them is in
-#: `CATEGORY_COLOURS`, so an unknown name never looks like a known category.
+#: For names not above, by the position of the category in its event's list in the
+#: taxonomy. None of them is in `CATEGORY_COLOURS`, so an unknown name never looks like
+#: a known category.
 FALLBACK = ("#882255", "#332288", "#117733", "#AA4499", "#999933", "#6E4B2A")
 HATCH_EDGE = "#8C8C8C"
 #: Category names that mean nobody could or did assess the time (the grid makes them
-#: -1); a name containing "not assessed" counts too.
+#: -1); a name containing "not assessed" counts too, and `_` and a space are the same.
 NOT_ASSESSED = ("not_observable", "unassessed")
 #: How much of a category's colour a span's pale fill keeps (the rest is white).
 SPAN_TINT = 0.6
@@ -76,10 +86,15 @@ class _Row:
     frame: pd.DataFrame
 
 
+def _plain(name: str) -> str:
+    """`name` in lower case with `_` and runs of space as a single space."""
+    return " ".join(name.replace("_", " ").lower().split())
+
+
 def _not_assessed(name: str) -> bool:
     """Whether a category name says this time was not assessed (or not observable)."""
-    low = name.strip().lower()
-    return low in NOT_ASSESSED or "not assessed" in low
+    low = _plain(name)
+    return low in {_plain(n) for n in NOT_ASSESSED} or "not assessed" in low
 
 
 def _order_key(event: str, taxonomy: Taxonomy | None):
@@ -185,38 +200,92 @@ def _tint(colour: str, weight: float = SPAN_TINT) -> tuple[float, float, float]:
 _SUFFIX = re.compile(r"\s*\([^()]*\)\s*$")
 
 
+def _category_id(category: object) -> int | None:
+    """A row's category as an int, None when it has none."""
+    try:
+        return int(category)
+    except (TypeError, ValueError):
+        return None
+
+
 def _colour_name(
     taxonomy: Taxonomy | None, event: str, category: object, name: str
 ) -> str:
-    """The name a category's colour and legend entry go by.
+    """The name a category's colour goes by.
 
     Producers write names such as `high (H)` or `uncertain (segment below the
     confidence floor)` where the taxonomy says `high` and `uncertain`: this is the
     taxonomy's name for the category id, else the row's own name without a trailing
-    parenthesis. (Whether the time was assessed is judged on the row's own name.)
+    parenthesis. (A row is also judged not assessed on its own name; see `_draw_rows`.)
     """
-    if taxonomy is not None and event in taxonomy:
-        try:
-            known = taxonomy.categories(event).get(int(category))
-        except (TypeError, ValueError):  # a missing category id
-            known = None
+    cid = _category_id(category)
+    if taxonomy is not None and event in taxonomy and cid is not None:
+        known = taxonomy.categories(event).get(cid)
         if known:
             return known
     return _SUFFIX.sub("", name) or name
 
 
+def _legend_name(key: str, name: str) -> str:
+    """The legend entry of a category: its colour name `key`, or the producer's own
+    `name` when that says more (`marfe (candidate)`, `uncertain (segment below the
+    confidence floor)`). An abbreviation in parentheses (`high (H)`) adds nothing."""
+    raw = " ".join(name.split())
+    if raw.lower() == key.lower():
+        return key
+    hit = _SUFFIX.search(raw)
+    if hit and _SUFFIX.sub("", raw).lower() == key.lower():
+        inner = hit.group().strip()[1:-1].strip().lower()
+        if inner and key.lower().startswith(inner):
+            return key
+    return raw
+
+
+def _position(taxonomy: Taxonomy | None, event: str, category: object) -> int | None:
+    """Where a category sits in the taxonomy's list for its event, else None."""
+    cid = _category_id(category)
+    if taxonomy is None or event not in taxonomy or cid is None:
+        return None
+    ids = list(taxonomy.categories(event))
+    return ids.index(cid) if cid in ids else None
+
+
+def _zero_words(taxonomy: Taxonomy | None, event: str) -> str | None:
+    """What category 0 says for `event` when that is not "absent: assessed and not
+    seen" (confinement: "the owner saved no regime here"); None where it is absent."""
+    if taxonomy is None:
+        return None
+    words = taxonomy.zero(event)
+    return None if words.lower().startswith("absent") else words
+
+
+def _owners_save(item) -> bool:
+    """Whether a label row is the owner's own save (reviewed tier, layer `saved`)."""
+    return (
+        getattr(item, "tier", None) == "reviewed"
+        and getattr(item, "layer", None) == "saved"
+    )
+
+
 class _Colours:
-    """Colour per category name: fixed for the known names, the next unused one of
-    `FALLBACK` (then generated ones) for the rest."""
+    """Colour per category name: fixed for the known names. Any other takes the
+    colour of `FALLBACK` at its `position` (that of its category in the event's list
+    in the taxonomy), so within an event it is the same in every figure; without a
+    position, the next index in draw order. A colour another name already holds in
+    this figure is skipped, so no two names share one."""
 
     def __init__(self):
         self._extra: dict[str, str] = {}
 
-    def __call__(self, name: str) -> str:
+    def __call__(self, name: str, position: int | None = None) -> str:
         if name in CATEGORY_COLOURS:
             return CATEGORY_COLOURS[name]
         if name not in self._extra:
-            self._extra[name] = self._next(len(self._extra))
+            index = len(self._extra) if position is None else position
+            used = {colour.lower() for colour in self._extra.values()}
+            while self._next(index).lower() in used:
+                index += 1
+            self._extra[name] = self._next(index)
         return self._extra[name]
 
     @staticmethod
@@ -235,14 +304,18 @@ def _draw_rows(
 ):
     """Paint the rows on `ax`; returns the legend handles of what was drawn.
 
-    A category is coloured, and listed in the legend, by its taxonomy name (see
-    `_colour_name`), so `high` and `high (H)` are one entry in one colour.
+    A category is coloured by its taxonomy name (see `_colour_name`), so `high` and
+    `high (H)` are one colour; the legend lists it by that name unless the producer's
+    own name says more (`_legend_name`). A row is left to the hatch when its category
+    name says not assessed (on its own name or the taxonomy's), and when it is category
+    0 of an event whose 0 is not "absent" (`Taxonomy.zero`) and not the owner's save;
+    the owner's own 0 is painted, and listed by the taxonomy's words.
     """
     _, patches, Line2D = _mpl()
     colour = _Colours()
     minimum = (x1 - x0) / 1500.0  # one pixel on a typical figure
     drawn: dict[str, str] = {}
-    skipped: set[str] = set()
+    not_observable = False
     kinds: set[str] = set()
     marks_x, marks_y = [], []
     count = len(rows)
@@ -280,13 +353,18 @@ def _draw_rows(
             continue
         for item in row.frame.itertuples():
             name = str(item.category_name)
-            if _not_assessed(name):
-                # Not drawn: the hatch of unassessed time stays visible here.
-                skipped.add(name.strip().lower())
-                continue
             key = _colour_name(taxonomy, item.event, item.category, name)
-            face = colour(key)
-            drawn[key] = face
+            if _not_assessed(name) or _not_assessed(key):
+                # Not drawn: the hatch of unassessed time stays visible here.
+                not_observable |= "observable" in _plain(name + " " + key)
+                continue
+            words = None
+            if _category_id(item.category) == 0:
+                words = _zero_words(taxonomy, item.event)
+                if words and not _owners_save(item):
+                    continue  # nothing was marked here, not even "absent"
+            face = colour(key, _position(taxonomy, item.event, item.category))
+            drawn[words or _legend_name(key, name)] = face
             start, stop = float(item.t_start_ms), float(item.t_end_ms)
             width = max(stop - start, minimum)
             kind = item.kind
@@ -318,9 +396,7 @@ def _draw_rows(
         ax.spines[side].set_visible(False)
     ax.set_xlabel("time (ms)")
 
-    hatch_name = (
-        "unassessed or not observable" if "not_observable" in skipped else "unassessed"
-    )
+    hatch_name = "unassessed or not observable" if not_observable else "unassessed"
     handles = [
         patches.Patch(
             facecolor="white", edgecolor=HATCH_EDGE, hatch="////", label=hatch_name
@@ -363,10 +439,12 @@ def timeline(
     gets its row, saying so. Default: every pair present, parents before their
     subcategories, each event's tiers in the order of `schema.TIER_ORDER`. A pair
     whose labels come from several datasets gets one row per dataset, named after
-    its method and version. Rows whose category says not assessed or not observable
-    are left as hatch. `taxonomy` supplies display names and the category names
-    that colours go by; without it event ids are shown and a category goes by its
-    own name less a trailing parenthesis. Returns the Axes; nothing is shown or saved.
+    its method and version. Rows whose category says not assessed or not observable,
+    and category 0 of confinement or detachment outside the owner's save (the taxonomy's
+    `zero` says it is not "absent"), are left as hatch. `taxonomy` supplies display
+    names, the category names that colours go by and what category 0 means; without it
+    event ids are shown, a category goes by its own name less a trailing parenthesis
+    and every category 0 is painted. Returns the Axes; nothing is shown or saved.
     """
     Figure, _, _ = _mpl()
     if labels["shot"].nunique() > 1:
@@ -477,6 +555,8 @@ def shot(
         ]
     window = t_range or _extent(labels)
     specs = _spec_list(signals)
+    for spec in specs:
+        signals_module.parse(spec)  # a malformed spec fails before any file is read
     traces = [
         signals_module.read(
             shot, spec, t_range=window, corpus=corpus, max_points=SIGNAL_POINTS

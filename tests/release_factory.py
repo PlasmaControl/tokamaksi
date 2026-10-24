@@ -140,6 +140,14 @@ def _labels() -> dict[tuple[str, str], list[dict]]:
         "test",
         _label(900006, elm, 1, 100, 400, tier="reviewed", split="test", flag=True),
     )
+    # The owner's save of a confinement shot: 0 is "saved no regime here" (see the
+    # taxonomy's `zero`), painted, unlike the same 0 in a machine draft.
+    add(
+        "reviewed",
+        "train",
+        _label(900004, conf, 0, 1500, 1700, tier="reviewed", split="train"),
+        _label(900004, conf, 1, 1700, 2000, tier="reviewed", split="train"),
+    )
     add(
         "original",
         "train",
@@ -233,9 +241,12 @@ def _labels() -> dict[tuple[str, str], list[dict]]:
     )
     kw = {"tier": "source", "split": "train", "layer": "source"}
     kw |= {"dataset": "confinement/raw/example_draft"}
+    # A draft's category 0 on confinement says nothing was marked, not "no regime":
+    # the grid makes it -1, so a plot leaves it hatched.
     add(
         "source",
         "train",
+        _label(900004, conf, 0, 0, 900, **kw),
         _label(900004, conf, 3, 900, 1200, **kw),
         _label(900004, conf, 4, 1200, 1500, **kw),
     )
