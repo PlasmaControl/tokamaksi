@@ -98,3 +98,14 @@ def test_the_envelope_skips_nan_gaps():
     y = np.vstack([np.where(t < 500, np.nan, np.sin(t))]).astype("float32")
     _, thin = signals.envelope(t, y, 10)
     assert np.isnan(thin[0, :10]).all() and not np.isnan(thin[0, 10:]).any()
+
+
+def test_the_many_channels_hint_names_live_channels(corpus, monkeypatch):
+    # filterscopes channels 0 and 1 recorded nothing: the example must not name them.
+    monkeypatch.setattr(signals, "MAX_BARE_CHANNELS", 2)
+    with pytest.raises(ValueError, match=r"filterscopes:2,3") as caught:
+        signals.read(900001, "filterscopes", corpus=corpus)
+    assert "filterscopes:0" not in str(caught.value)
+    # An all-NaN stretch finds nothing to name and says so.
+    assert "none showed data" in signals._name_some("g", 40, [])
+    assert "..." in signals._name_some("g", 40, list(range(20)))

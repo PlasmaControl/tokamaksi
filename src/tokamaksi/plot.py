@@ -1,10 +1,12 @@
 """Draw a shot's labels, and a few of its signals above them. Needs `tokamaksi[plot]`.
 
 Two rules the drawing never bends. Time nobody assessed is hatched grey: not white,
-and not the colour of category 0, which means "assessed, not seen". A span (a
-stretch of activity) is a pale box with a coloured edge and an individual event is a
-dark-edged box with a triangle above its row, so the two differ by shape and not
-only colour.
+and not the colour of category 0, which means "assessed, not seen". That includes
+rows whose category says so (`unassessed`, `unmarked (not assessed)`) and rows
+marked `not_observable`: the 10 ms grid makes all of them -1, so they are not drawn
+and the hatch shows through. A span (a stretch of activity) is a pale box with a
+coloured edge and an individual event is a dark-edged box with a triangle above its
+row, so the two differ by shape and not only colour.
 """
 
 from __future__ import annotations
@@ -33,11 +35,17 @@ CATEGORY_COLOURS = {
     "attached": "#0072B2",
     "detached": "#D55E00",
     "marfe": "#F0E442",
-    "not_observable": "#9A9A9A",
-    "absent": "#D7E3EC",
+    # Neutral, not blue: a span of "present" is a pale blue and must not be mistaken
+    # for assessed-and-absent time.
+    "absent": "#E3DCCB",
 }
 FALLBACK = ("#CC79A7", "#56B4E9", "#009E73", "#F0E442", "#D55E00", "#E69F00")
 HATCH_EDGE = "#8C8C8C"
+#: Category names that mean nobody could or did assess the time (the grid makes them
+#: -1); a name containing "not assessed" counts too.
+NOT_ASSESSED = ("not_observable", "unassessed")
+#: How much of a category's colour a span's pale fill keeps (the rest is white).
+SPAN_TINT = 0.6
 INK = "#1A1A1A"
 TIER_TAG = {"reviewed": "rev", "original": "orig", "derived": "der", "source": "src"}
 #: Signal points drawn per channel: a longer window is thinned to min/max pairs.
@@ -65,6 +73,12 @@ class _Row:
     frame: pd.DataFrame
 
 
+def _not_assessed(name: str) -> bool:
+    """Whether a category name says this time was not assessed (or not observable)."""
+    low = name.strip().lower()
+    return low in NOT_ASSESSED or "not assessed" in low
+
+
 def _order_key(event: str, taxonomy: Taxonomy | None):
     """Parents first, each followed by its subcategories."""
     if taxonomy is None or event not in taxonomy:
@@ -75,7 +89,9 @@ def _order_key(event: str, taxonomy: Taxonomy | None):
     return (names.index(root), 0 if root == event else 1, names.index(event))
 
 
-def _row_label(event: str, tier: str, taxonomy: Taxonomy | None) -> str:
+def _row_label(
+    event: str, tier: str, taxonomy: Taxonomy | None, dataset: str = ""
+) -> str:
     name = (
         taxonomy.display(event) if taxonomy is not None and event in taxonomy else event
     )
@@ -84,7 +100,29 @@ def _row_label(event: str, tier: str, taxonomy: Taxonomy | None) -> str:
         if taxonomy is not None and event in taxonomy and taxonomy.parent(event)
         else ""
     )
-    return f"{indent}{name} [{TIER_TAG.get(tier, tier)}]"
+    return f"{indent}{name} [{TIER_TAG.get(tier, tier)}]" + (
+        f" {dataset}" if dataset else ""
+    )
+
+
+def _dataset_tags(frame: pd.DataFrame) -> dict[str, str]:
+    """A short name for each dataset in `frame` that tells them apart: method and
+    version, else the last part of the dataset id, else the whole id."""
+    info = frame.drop_duplicates("dataset")
+
+    def last(row) -> str:
+        return str(row.dataset).rstrip("/").rsplit("/", 1)[-1]
+
+    def method(row) -> str:
+        parts = (str(row.method or ""), str(row.version or ""))
+        return " ".join(part for part in parts if part) or last(row)
+
+    tags: dict[str, str] = {}
+    for name in (method, last, lambda row: str(row.dataset)):
+        tags = {str(row.dataset): name(row) for row in info.itertuples()}
+        if len(set(tags.values())) == len(tags):
+            break
+    return tags
 
 
 def _make_rows(
@@ -97,15 +135,25 @@ def _make_rows(
             {(e, t) for e, t in zip(labels["event"], labels["tier"])},
             key=lambda pair: (_order_key(pair[0], taxonomy), pair[1]),
         )
-    return [
-        _Row(
-            event,
-            tier,
-            _row_label(event, tier, taxonomy),
-            labels[(labels["event"] == event) & (labels["tier"] == tier)],
-        )
-        for event, tier in rows
-    ]
+    out = []
+    for event, tier in rows:
+        frame = labels[(labels["event"] == event) & (labels["tier"] == tier)]
+        if frame["dataset"].nunique() <= 1:
+            out.append(_Row(event, tier, _row_label(event, tier, taxonomy), frame))
+            continue
+        # Several datasets in one tier (several machine drafts, say) get a row each:
+        # on one row their boxes would cover one another.
+        tags = _dataset_tags(frame)
+        for dataset in sorted(tags, key=lambda name: (tags[name], name)):
+            out.append(
+                _Row(
+                    event,
+                    tier,
+                    _row_label(event, tier, taxonomy, tags[dataset]),
+                    frame[frame["dataset"] == dataset],
+                )
+            )
+    return out
 
 
 def _extent(labels: pd.DataFrame) -> tuple[float, float] | None:
@@ -116,7 +164,7 @@ def _extent(labels: pd.DataFrame) -> tuple[float, float] | None:
     return low - pad, high + pad
 
 
-def _tint(colour: str, weight: float = 0.45) -> tuple[float, float, float]:
+def _tint(colour: str, weight: float = SPAN_TINT) -> tuple[float, float, float]:
     """`colour` mixed with white: a pale, opaque version of it."""
     from matplotlib.colors import to_rgb
 
@@ -143,6 +191,7 @@ def _draw_rows(ax, rows: list[_Row], x0: float, x1: float):
     colour = _Colours()
     minimum = (x1 - x0) / 1500.0  # one pixel on a typical figure
     drawn: dict[str, str] = {}
+    skipped: set[str] = set()
     kinds: set[str] = set()
     marks_x, marks_y = [], []
     count = len(rows)
@@ -180,6 +229,10 @@ def _draw_rows(ax, rows: list[_Row], x0: float, x1: float):
             continue
         for item in row.frame.itertuples():
             name = str(item.category_name)
+            if _not_assessed(name):
+                # Not drawn: the hatch of unassessed time stays visible here.
+                skipped.add(name.strip().lower())
+                continue
             face = colour(name)
             drawn[name] = face
             start, stop = float(item.t_start_ms), float(item.t_end_ms)
@@ -213,9 +266,12 @@ def _draw_rows(ax, rows: list[_Row], x0: float, x1: float):
         ax.spines[side].set_visible(False)
     ax.set_xlabel("time (ms)")
 
+    hatch_name = (
+        "unassessed or not observable" if "not_observable" in skipped else "unassessed"
+    )
     handles = [
         patches.Patch(
-            facecolor="white", edgecolor=HATCH_EDGE, hatch="////", label="unassessed"
+            facecolor="white", edgecolor=HATCH_EDGE, hatch="////", label=hatch_name
         )
     ]
     handles += [
@@ -253,8 +309,10 @@ def timeline(
 
     rows: the `(event, tier)` pairs to draw, in order; a pair with no labels still
     gets its row, saying so. Default: every pair present, parents before their
-    subcategories. `taxonomy` supplies display names; without it event ids are shown.
-    Returns the Axes; nothing is shown or saved.
+    subcategories. A pair whose labels come from several datasets gets one row per
+    dataset, named after its method and version. Rows whose category says not
+    assessed or not observable are left as hatch. `taxonomy` supplies display names;
+    without it event ids are shown. Returns the Axes; nothing is shown or saved.
     """
     Figure, _, _ = _mpl()
     if labels["shot"].nunique() > 1:

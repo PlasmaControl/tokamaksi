@@ -1,5 +1,6 @@
 import pytest
 
+import tokamaksi as tk
 from tokamaksi import cli, hf
 
 
@@ -92,3 +93,25 @@ def test_user_errors_exit_two_without_a_traceback(
     monkeypatch.setenv("TOKAMAKSI_RELEASE", str(synthetic))
     code, out, err = run(capsys, *argv)
     assert code == 2 and text in err and "Traceback" not in err and out == ""
+
+
+@pytest.mark.parametrize(
+    "error, text",
+    [
+        (OSError("No space left on device"), "No space left"),
+        (
+            tk.OfflineError("cannot reach the Hub (ConnectError)"),
+            "cannot reach the Hub",
+        ),
+    ],
+)
+def test_pull_failures_are_one_line_not_a_traceback(capsys, monkeypatch, error, text):
+    monkeypatch.delenv("TOKAMAKSI_OFFLINE")
+
+    def broken(repo, tag, dest, patterns):
+        raise error
+
+    monkeypatch.setattr(hf, "hub_backend", broken)
+    code, out, err = run(capsys, "pull", "v1")
+    assert code == 2 and text in err and "Traceback" not in err and out == ""
+    assert not hf.release_dir("v1").exists()

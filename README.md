@@ -28,7 +28,9 @@ against the sha256 in `release.json` and moves it into place, so a failed pull l
 nothing half-written. Hugging Face's own cache (`HF_HOME`) is never changed, and no
 token is ever read or shown by tokamaksi. Set `TOKAMAKSI_OFFLINE=1` to forbid the
 network; a release that is not on disk then says which command to run. A release
-folder from anywhere else opens by path: `tk.open_release("/path/to/release")`.
+folder from anywhere else opens by path: `tk.open_release("/path/to/release")`. A
+folder in the way that has no `release.json` is not a release: `pull` replaces an empty
+one and stops at any other, naming `--force`.
 
 ## Use
 
@@ -54,17 +56,22 @@ as `(channels, samples)`) and stack signals over the labels:
 
     export TOKAMAKSI_CORPUS=<folder of *_processed.h5>
     tk.signals.available(185866)                # groups that ran, with (channels, samples)
-    tk.plot.shot(185866, ["edge_localized_mode"], signals=["filterscopes:0", "neutron_rate:0"])
-    tokamaksi plot 185866 --events edge_localized_mode --signals filterscopes:0,neutron_rate:0 --out shot.png
+    tk.plot.shot(185866, ["edge_localized_mode"], signals=["filterscopes:1", "neutron_rate:3"])
+    tokamaksi plot 185866 --events edge_localized_mode --signals filterscopes:1,neutron_rate:3 --out shot.png
 
-A signal is `group` (every channel, up to eight), `group:3` or `group:0,2,5`. The
-folder covers only some shots; a shot or group it lacks raises a clear error. Fetching
-signals live from DIII-D (fdp) is planned, not built.
+A signal is `group` (every channel, up to eight), `group:3` or `group:0,2,5`. A
+channel that recorded nothing on a shot is all NaN there (`filterscopes:0` and
+`neutron_rate:0` on 185866): naming it raises `NoDataError`, and a bare group leaves
+it out (`neutron_rate` alone is channel 3). The folder covers only some shots; a shot
+or group it lacks raises a clear error. Fetching signals live from DIII-D (fdp) is
+planned, not built.
 
 ## Read this before using the labels
 
 * Missing is not zero. A row with category 0 says "assessed, not seen"; time with no
-  row was never assessed (`-1` on the grid, hatched grey in plots).
+  row was never assessed (`-1` on the grid, hatched grey in plots). Rows named
+  `unassessed`, `unmarked (not assessed)` or `not_observable` count as not assessed
+  too: the grid makes them -1 and plots leave them hatched.
 * `tier="reviewed"` are tables a person saved on the review page. Many saved ELM
   individuals are detector output a reviewer confirmed, not hand-timed onsets.
   `original` are third-party tables, `derived` model or rule outputs, and `source`

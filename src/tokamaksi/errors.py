@@ -12,7 +12,7 @@ class AccessError(TokamaksiError):
 
 
 class OfflineError(TokamaksiError):
-    """A release is not on disk and the network is switched off."""
+    """A release is not on disk and the network is switched off or unreachable."""
 
 
 class ReleaseError(TokamaksiError):

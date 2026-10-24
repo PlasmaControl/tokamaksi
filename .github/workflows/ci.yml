@@ -7,6 +7,12 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # One Python; the second leg pins the oldest dependencies pyproject allows.
+        pins:
+          - ""
+          - "pandas==2.2.* pyarrow==17.* numpy==1.26.* huggingface_hub==0.34.*"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -14,6 +20,9 @@ jobs:
           python-version: "3.11"
       - name: Install
         run: pip install -e ".[plot,h5,test]"
+      - name: Pin the dependency floor
+        if: matrix.pins != ''
+        run: pip install ${{ matrix.pins }}
       - name: Lint
         run: ruff check .
       - name: Test

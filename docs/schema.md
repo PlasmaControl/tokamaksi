@@ -58,7 +58,9 @@ needs one of the two must choose how to read it.
 Category 0 is `absent` for most events: assessed and not seen. Time that no row covers
 was not assessed. On the grid it is `-1` (`tokamaksi.schema.UNASSESSED`), and plots draw
 it hatched grey, never white and never the colour of category 0. Some events name
-something else for 0 (`Taxonomy.zero(event)`).
+something else for 0 (`Taxonomy.zero(event)`). Rows whose category is `not_observable`,
+`unassessed` or `unmarked (not assessed)` are not assessed either: the grid rule makes
+those frames -1, and the plot leaves the hatch showing instead of painting them.
 
 ## The 10 ms grid
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import importlib
 import json
 import os
 import shutil
@@ -39,6 +40,18 @@ def _access_error(repo: str, tag: str, why: str) -> AccessError:
     )
 
 
+def _network_errors() -> tuple[type[BaseException], ...]:
+    """The connection errors of whichever HTTP client this huggingface_hub uses
+    (`requests` before 1.0, `httpx` since); either may be absent."""
+    kinds = []
+    for module, name in (("requests", "RequestException"), ("httpx", "HTTPError")):
+        try:
+            kinds.append(getattr(importlib.import_module(module), name))
+        except ImportError:
+            pass
+    return tuple(kinds)
+
+
 def hub_backend(
     repo: str, tag: str, dest: Path, patterns: tuple[str, ...]
 ) -> str | None:
@@ -73,8 +86,30 @@ def hub_backend(
         status = getattr(getattr(error, "response", None), "status_code", None)
         if status in (401, 403, 404):
             raise _access_error(repo, tag, f"HTTP {status}") from error
+        if status == 429 or (status or 0) >= 500:
+            raise OfflineError(
+                f"the Hub answered HTTP {status} for {repo} at {tag}; try again later, "
+                f"or set TOKAMAKSI_OFFLINE=1 to use a release already on disk."
+            ) from error
         raise
+    except _network_errors() as error:
+        raise OfflineError(
+            f"cannot reach the Hub to read {repo} at {tag} ({type(error).__name__}: "
+            f"{error}). Check the network, or set TOKAMAKSI_OFFLINE=1 to use a release "
+            f"already on disk."
+        ) from error
     return commit
+
+
+def _conflict(target: Path, tag: str) -> ReleaseError:
+    return ReleaseError(
+        f"{target} exists but is not a release (it has no release.json). Remove it, or "
+        f"run `tokamaksi pull {tag} --force` to replace it."
+    )
+
+
+def _is_empty_dir(path: Path) -> bool:
+    return path.is_dir() and not any(path.iterdir())
 
 
 def pull(
@@ -90,9 +125,13 @@ def pull(
     The files go into a temporary folder beside it, are checked against the sha256
     and sizes `release.json` lists, and are then moved into place with one
     `os.replace`, so a failed or interrupted pull leaves nothing half-written. A
-    tag that is already on disk is left as is unless `force`. Everything but the
+    tag that is already on disk is left as is unless `force`, which swaps the old
+    folder aside first and puts it back if the new one cannot be installed. A
+    folder in the way that holds no `release.json` is not a release: an empty one is
+    replaced, any other raises `ReleaseError` unless `force`. Everything but the
     `tables/` mirror is fetched (about 20 MB for v1).
     """
+    from . import __version__
     from .release import _OPEN, Release
 
     if not config.is_tag(tag):
@@ -100,6 +139,8 @@ def pull(
     target = release_dir(tag, home)
     if (target / "release.json").is_file() and not force:
         return target
+    if target.exists() and not force and not _is_empty_dir(target):
+        raise _conflict(target, tag)  # before a download that could not be used
     if config.offline():
         raise OfflineError(
             f"cannot pull {tag}: the network is off (TOKAMAKSI_OFFLINE or HF_HUB_OFFLINE)"
@@ -124,6 +165,7 @@ def pull(
                     "repo": repo,
                     "tag": tag,
                     "commit": commit,
+                    "tokamaksi_version": __version__,
                     "pulled_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
                 },
                 indent=1,
@@ -132,16 +174,40 @@ def pull(
             encoding="utf-8",
         )
         _set_modes(partial)
-        if target.exists():
-            if not force:
-                # Another process pulled the same tag meanwhile: keep theirs.
-                return target
-            shutil.rmtree(target)
-        os.replace(partial, target)
+        if not _install(partial, target, tag, force=force):
+            return target  # another process pulled the same tag first: keep theirs
         _OPEN.pop(target.resolve(), None)
         return target
     finally:
         shutil.rmtree(partial, ignore_errors=True)
+
+
+def _install(partial: Path, target: Path, tag: str, *, force: bool) -> bool:
+    """Move the verified `partial` to `target`; False when a complete release was
+    put there meanwhile and is kept."""
+    aside = None
+    try:
+        if force and target.exists():
+            aside = Path(tempfile.mkdtemp(prefix=f".old-{tag}-", dir=target.parent))
+            aside.rmdir()
+            os.replace(target, aside)
+        elif _is_empty_dir(target):
+            target.rmdir()
+        os.replace(partial, target)
+    except OSError as error:
+        if aside is not None and not target.exists():
+            try:
+                os.replace(aside, target)  # put the old copy back
+            except OSError:
+                pass
+        if (target / "release.json").is_file() and not force:
+            return False
+        if target.exists() and not force:
+            raise _conflict(target, tag) from error
+        raise ReleaseError(f"could not install {tag} into {target}: {error}") from error
+    if aside is not None:
+        shutil.rmtree(aside, ignore_errors=True)
+    return True
 
 
 def _set_modes(folder: Path) -> None:

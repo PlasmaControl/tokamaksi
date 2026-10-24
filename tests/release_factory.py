@@ -55,6 +55,14 @@ _CATEGORIES = {
         2: "uncertain",
         3: "not_observable",
     },
+    # As in the real taxonomy, category 4 says nobody assessed the time.
+    "resistive_wall_mode": {
+        0: "absent",
+        1: "present",
+        2: "uncertain",
+        3: "not_observable",
+        4: "unassessed",
+    },
 }
 
 
@@ -75,6 +83,8 @@ def _label(
     flag=None,
     dataset=None,
     layer="saved",
+    method="synthetic",
+    version="",
 ):
     return {
         "shot": shot,
@@ -89,8 +99,8 @@ def _label(
         "tier": tier,
         "layer": layer,
         "dataset": dataset or f"{event}/{tier}/synthetic",
-        "method": "synthetic",
-        "version": "",
+        "method": method,
+        "version": version,
         "reviewer": "R1" if tier == "reviewed" else "",
         "split": split,
     }
@@ -185,6 +195,19 @@ def _labels() -> dict[tuple[str, str], list[dict]]:
             layer="extend",
             dataset="edge_localized_mode/extend_example_rule",
         ),
+    )
+    # Two datasets in one tier on one shot, and time the tables say nobody assessed.
+    rwm = "resistive_wall_mode"
+    a = {"dataset": f"{rwm}/extend_rule_a/windows", "method": "rule_a", "version": "v2"}
+    b = {"dataset": f"{rwm}/extend_rule_b/onsets", "method": "rule_b", "version": "v1"}
+    der = {"tier": "derived", "split": "train", "layer": "extend"}
+    add(
+        "derived",
+        "train",
+        _label(900003, rwm, 1, 100, 300, flag=True, **der, **a),
+        _label(900003, rwm, 4, 300, 900, **der, **a),
+        _label(900003, rwm, 3, 900, 1200, **der, **a),
+        _label(900003, rwm, 1, 150, 160, flag=False, **der, **b),
     )
     add(
         "source",

@@ -1,10 +1,11 @@
 import numpy as np
+import pandas as pd
 import pytest
 
 import tokamaksi as tk
 
 pytest.importorskip("matplotlib")
-from matplotlib.colors import to_hex  # noqa: E402
+from matplotlib.colors import to_hex, to_rgb  # noqa: E402
 
 from tokamaksi import plot  # noqa: E402
 
@@ -126,3 +127,78 @@ def test_timeline_alone(rel):
     with pytest.raises(ValueError, match="one shot"):
         plot.timeline(tk.load_labels("edge_localized_mode", release=rel))
     assert np.allclose(ax.get_xlim(), (-30.0, 1530.0))
+
+
+@pytest.mark.parametrize(
+    "name, expected",
+    [
+        ("unassessed", True),
+        ("Unassessed", True),
+        ("unmarked (not assessed)", True),
+        ("not_observable", True),
+        ("absent", False),
+        ("uncertain", False),
+        ("uncertain (segment below the confidence floor)", False),
+        ("low (L)", False),
+        ("present", False),
+    ],
+)
+def test_which_category_names_mean_not_assessed(name, expected):
+    assert plot._not_assessed(name) is expected
+
+
+def test_not_assessed_rows_leave_the_hatch_showing(rel):
+    # 900003 holds, in rule_a's table, present 100-300, unassessed 300-900 and
+    # not_observable 900-1200; rule_b's table adds an individual at 150-160.
+    fig = plot.shot(900003, ["resistive_wall_mode"], tier="derived", release=rel)
+    ax = _label_axes(fig)
+    boxes = [p for p in ax.patches if not p.get_hatch()]
+    assert sorted((p.get_x(), p.get_width()) for p in boxes) == [(100, 200), (150, 10)]
+    assert len(_hatched(ax)) == 2  # the hatch of each row is the only thing 300-1200
+    legend = [t.get_text() for t in fig.legends[0].get_texts()]
+    assert legend == ["unassessed or not observable", "present", "span", "individual"]
+
+
+def test_a_tier_with_several_datasets_gets_a_row_each(rel):
+    ax = _label_axes(
+        plot.shot(900003, ["resistive_wall_mode"], tier="derived", release=rel)
+    )
+    assert [t.get_text() for t in ax.get_yticklabels()] == [
+        "resistive_wall_mode [der] rule_a v2",
+        "resistive_wall_mode [der] rule_b v1",
+    ]
+    # One dataset (or a dataset filter): no suffix.
+    one = _label_axes(
+        plot.shot(
+            900003,
+            ["resistive_wall_mode"],
+            tier="derived",
+            dataset="resistive_wall_mode/extend_rule_b/onsets",
+            release=rel,
+        )
+    )
+    assert [t.get_text() for t in one.get_yticklabels()] == [
+        "resistive_wall_mode [der]"
+    ]
+
+
+def test_dataset_tags_fall_back_until_they_differ():
+    def frame(*rows):
+        return pd.DataFrame(rows, columns=["dataset", "method", "version"])
+
+    by_method = plot._dataset_tags(
+        frame(("a/x/one", "m1", "v1"), ("a/x/two", "m2", ""))
+    )
+    assert by_method == {"a/x/one": "m1 v1", "a/x/two": "m2"}
+    same_method = plot._dataset_tags(frame(("a/x/one", "m", ""), ("a/x/two", "m", "")))
+    assert same_method == {"a/x/one": "one", "a/x/two": "two"}
+    same_name = plot._dataset_tags(
+        frame(("a/one/data", "m", ""), ("a/two/data", "m", ""))
+    )
+    assert same_name == {"a/one/data": "a/one/data", "a/two/data": "a/two/data"}
+
+
+def test_a_present_span_is_not_the_colour_of_absent():
+    span = np.array(plot._tint(plot.CATEGORY_COLOURS["present"]))
+    absent = np.array(to_rgb(plot.CATEGORY_COLOURS["absent"]))
+    assert np.linalg.norm(span - absent) > 0.4

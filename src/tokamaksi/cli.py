@@ -155,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.run(args)
-    except (TokamaksiError, ValueError, ImportError) as error:
+    except (TokamaksiError, ValueError, ImportError, OSError) as error:
         print(f"tokamaksi: {error}", file=sys.stderr)
         return 2
 

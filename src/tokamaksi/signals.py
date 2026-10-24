@@ -131,6 +131,31 @@ def _bisect(x, value: float, *, right: bool) -> int:
     return low
 
 
+def _live_rows(y, start: int, stop: int, width: int = 1000) -> list[int]:
+    """The channels with data in a short stretch from the middle of `[start, stop)`:
+    one small read, so it stays quick on a long record with many channels."""
+    middle = (start + stop) // 2
+    low, high = max(start, middle - width // 2), min(stop, middle + width // 2)
+    sample = np.asarray(y[:, low:high])
+    return [int(row) for row in np.flatnonzero(~np.isnan(sample).all(axis=1))]
+
+
+def _name_some(group: str, count: int, live: list[int]) -> str:
+    """The error for a bare group with too many channels; the example names channels
+    that show data, because a channel that recorded nothing raises `NoDataError`."""
+    if not live:
+        return (
+            f"{group!r} has {count} channels: name some, e.g. '{group}:0,1' (none "
+            f"showed data near the middle of the window)"
+        )
+    shown = ", ".join(str(row) for row in live[:8]) + (", ..." if len(live) > 8 else "")
+    return (
+        f"{group!r} has {count} channels: name some, e.g. "
+        f"'{group}:{','.join(str(row) for row in live[:2])}' (channels with data near "
+        f"the middle of the window: {shown})"
+    )
+
+
 def envelope(
     t_ms: np.ndarray, y: np.ndarray, bins: int
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -192,10 +217,6 @@ def read(
                 f"(ydata is {y.shape}): that diagnostic did not run"
             )
         rows = tuple(range(y.shape[0])) if wanted is None else wanted
-        if wanted is None and len(rows) > MAX_BARE_CHANNELS:
-            raise ValueError(
-                f"{group!r} has {len(rows)} channels: name some, e.g. '{group}:0,1'"
-            )
         bad = [row for row in rows if not 0 <= row < y.shape[0]]
         if bad:
             raise ValueError(f"{group!r} has {y.shape[0]} channels, not {bad}")
@@ -207,6 +228,8 @@ def read(
                 raise NoDataError(
                     f"shot {int(shot)} {group!r} has no samples in {t_range[0]}-{t_range[1]} ms"
                 )
+        if wanted is None and len(rows) > MAX_BARE_CHANNELS:
+            raise ValueError(_name_some(group, len(rows), _live_rows(y, start, stop)))
         t_ms = np.asarray(x[start:stop], dtype="float64") * 1000.0
         values = np.stack([y[row, start:stop] for row in rows]).astype("float32")
     # The corpus marks a channel that recorded nothing with NaN throughout.

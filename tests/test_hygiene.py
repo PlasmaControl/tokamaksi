@@ -1,5 +1,11 @@
 """Nothing that must stay private is tracked: no data, no cluster paths, no tokens.
 
+What it checks: no data-file suffixes, no file over 1 MB, none of the file names a
+release is made of, no cluster path, Hub token or ELM challenge key in any tracked
+text, and a `.gitignore` that blocks data without blocking package code. What it
+does not check: names of reviewers or third-party tables, and the challenge's shot
+list; the maintainer's pre-push search covers those.
+
 The patterns are assembled from pieces so this file does not trip its own search.
 """
 
@@ -27,6 +33,15 @@ DATA_SUFFIXES = {
     ".ckpt",
     ".jsonl",
     ".csv",
+}
+#: The files a release is made of: a real copy of one must never be committed.
+RELEASE_PARTS = {
+    "release.json",
+    "taxonomy.yaml",
+    "signals.yaml",
+    "datasets.parquet",
+    "LICENSE.md",
+    ".tokamaksi.json",
 }
 FORBIDDEN = {
     "a cluster path": re.compile(
@@ -73,6 +88,8 @@ def test_no_data_files_or_big_files_are_tracked():
     assert not data, f"data files tracked: {data}"
     big = [n for n in names if (ROOT / n).stat().st_size > 1_000_000]
     assert not big, f"files over 1 MB tracked: {big}"
+    parts = [n for n in names if Path(n).name in RELEASE_PARTS]
+    assert not parts, f"release files tracked: {parts}"
 
 
 def test_no_private_strings_in_tracked_files():
