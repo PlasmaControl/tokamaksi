@@ -85,12 +85,13 @@ def _label(
     layer="saved",
     method="synthetic",
     version="",
+    name=None,
 ):
     return {
         "shot": shot,
         "event": event,
         "category": category,
-        "category_name": _CATEGORIES[event][category],
+        "category_name": name or _CATEGORIES[event][category],
         "t_start_ms": float(start),
         "t_end_ms": float(stop),
         "confidence": None,
@@ -208,6 +209,35 @@ def _labels() -> dict[tuple[str, str], list[dict]]:
         _label(900003, rwm, 4, 300, 900, **der, **a),
         _label(900003, rwm, 3, 900, 1200, **der, **a),
         _label(900003, rwm, 1, 150, 160, flag=False, **der, **b),
+    )
+    # Derived confinement names carry a suffix the taxonomy does not (`high (H)`);
+    # the source table of the same shot uses the plain names.
+    kw = {"tier": "derived", "split": "train", "layer": "extend"}
+    kw |= {"dataset": "confinement/extend_example_rule", "method": "example_rule"}
+    add(
+        "derived",
+        "train",
+        _label(900004, conf, 1, 0, 500, name="high (H)", **kw),
+        _label(900004, conf, 2, 500, 900, name="low (L)", **kw),
+        _label(900004, conf, 3, 900, 1200, name="qh (QH)", **kw),
+        _label(900004, conf, 4, 1200, 1500, name="wpqh (WPQH)", **kw),
+        _label(
+            900004,
+            conf,
+            5,
+            1500,
+            1700,
+            name="uncertain (segment below the confidence floor)",
+            **kw,
+        ),
+    )
+    kw = {"tier": "source", "split": "train", "layer": "source"}
+    kw |= {"dataset": "confinement/raw/example_draft"}
+    add(
+        "source",
+        "train",
+        _label(900004, conf, 3, 900, 1200, **kw),
+        _label(900004, conf, 4, 1200, 1500, **kw),
     )
     add(
         "source",

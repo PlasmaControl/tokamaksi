@@ -206,3 +206,61 @@ def test_access_error_names_three_steps_and_no_token():
     text = str(error)
     assert "hf auth login" in text and "HF_TOKEN" in text and "read access" in text
     assert "hf_" not in text.replace("HF_TOKEN", "")
+
+
+def test_a_forced_pull_that_loses_a_race_keeps_the_winner(
+    online, monkeypatch, synthetic
+):
+    hf.pull("v1", backend=_fake(synthetic))
+    real = os.replace
+
+    def race(src, dst, *a, **k):
+        real(src, dst, *a, **k)
+        if Path(dst).name.startswith(".old-"):
+            # The old copy is aside; another puller installs v1 before our rename.
+            shutil.copytree(synthetic, hf.release_dir("v1"))
+            (hf.release_dir("v1") / "theirs").write_text("x")
+
+    monkeypatch.setattr(os, "replace", race)
+    target = hf.pull("v1", force=True, backend=_fake(synthetic))
+    monkeypatch.setattr(os, "replace", real)
+    assert (target / "theirs").exists() and (target / "release.json").is_file()
+    assert [p.name for p in hf.releases_dir().iterdir()] == ["v1"]  # no .old-* left
+
+
+def test_a_forced_pull_that_cannot_move_the_old_copy_aside_is_not_a_win(
+    online, monkeypatch, synthetic
+):
+    hf.pull("v1", backend=_fake(synthetic))
+    (hf.release_dir("v1") / "old-marker").write_text("x")
+    real = os.replace
+
+    def refuse(src, dst, *a, **k):
+        if Path(src) == hf.release_dir("v1"):
+            raise PermissionError("busy")
+        return real(src, dst, *a, **k)
+
+    monkeypatch.setattr(os, "replace", refuse)
+    with pytest.raises(tk.ReleaseError, match="could not install"):
+        hf.pull("v1", force=True, backend=_fake(synthetic))
+    monkeypatch.setattr(os, "replace", real)
+    assert (hf.release_dir("v1") / "old-marker").exists()  # still the old copy
+    assert [p.name for p in hf.releases_dir().iterdir()] == ["v1"]
+
+
+@pytest.mark.parametrize("name", ["LocalEntryNotFoundError", "OfflineModeIsEnabled"])
+def test_hub_exceptions_for_no_connection_reach_the_caller_as_offline(
+    online, monkeypatch, name
+):
+    import huggingface_hub
+    from huggingface_hub import errors
+
+    error = getattr(errors, name)("no connection")
+
+    def unreachable(self, *args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(huggingface_hub.HfApi, "dataset_info", unreachable)
+    with pytest.raises(tk.OfflineError, match="cannot reach the Hub"):
+        tk.open_release("v1")  # the library's auto-pull, not only the backend
+    assert list(hf.releases_dir().iterdir()) == []  # nothing left behind

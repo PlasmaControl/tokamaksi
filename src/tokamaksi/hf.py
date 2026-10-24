@@ -65,6 +65,8 @@ def hub_backend(
     from huggingface_hub.errors import (
         GatedRepoError,
         HfHubHTTPError,
+        LocalEntryNotFoundError,
+        OfflineModeIsEnabled,
         RepositoryNotFoundError,
         RevisionNotFoundError,
     )
@@ -82,6 +84,15 @@ def hub_backend(
         raise ReleaseError(f"{repo} has no release tagged {tag}") from error
     except (RepositoryNotFoundError, GatedRepoError) as error:
         raise _access_error(repo, tag, type(error).__name__) from error
+    except (LocalEntryNotFoundError, OfflineModeIsEnabled) as error:
+        # The Hub could not be reached and nothing local answers (huggingface_hub
+        # says so with these, not with a connection error). Before the HTTP clause:
+        # before hub 1.0, LocalEntryNotFoundError is an HfHubHTTPError too.
+        raise OfflineError(
+            f"cannot reach the Hub to read {repo} at {tag} ({type(error).__name__}). "
+            f"Check the network, or set TOKAMAKSI_OFFLINE=1 to use a release already "
+            f"on disk."
+        ) from error
     except HfHubHTTPError as error:
         status = getattr(getattr(error, "response", None), "status_code", None)
         if status in (401, 403, 404):
@@ -126,7 +137,8 @@ def pull(
     and sizes `release.json` lists, and are then moved into place with one
     `os.replace`, so a failed or interrupted pull leaves nothing half-written. A
     tag that is already on disk is left as is unless `force`, which swaps the old
-    folder aside first and puts it back if the new one cannot be installed. A
+    folder aside first and puts it back if the new one cannot be installed (a
+    complete release another process installs meanwhile is kept instead). A
     folder in the way that holds no `release.json` is not a release: an empty one is
     replaced, any other raises `ReleaseError` unless `force`. Everything but the
     `tables/` mirror is fetched (about 20 MB for v1).
@@ -188,23 +200,36 @@ def _install(partial: Path, target: Path, tag: str, *, force: bool) -> bool:
     aside = None
     try:
         if force and target.exists():
-            aside = Path(tempfile.mkdtemp(prefix=f".old-{tag}-", dir=target.parent))
-            aside.rmdir()
-            os.replace(target, aside)
+            spot = Path(tempfile.mkdtemp(prefix=f".old-{tag}-", dir=target.parent))
+            spot.rmdir()
+            os.replace(target, spot)
+            aside = spot  # set only once the old copy is really there
         elif _is_empty_dir(target):
             target.rmdir()
         os.replace(partial, target)
     except OSError as error:
-        if aside is not None and not target.exists():
+        moved = aside is not None  # the old copy is out of the way
+        taken = target.exists()  # judged before the old copy goes back
+        if moved and not taken:
             try:
                 os.replace(aside, target)  # put the old copy back
+                aside = None
             except OSError:
                 pass
-        if (target / "release.json").is_file() and not force:
+        if taken and (target / "release.json").is_file() and (moved or not force):
+            # Another process installed a complete release (between our two renames
+            # when forcing): keep theirs, the old copy is not needed any more. A
+            # forced pull that could not move the old copy aside still sees that
+            # copy here, and is not this case.
+            if aside is not None:
+                shutil.rmtree(aside, ignore_errors=True)
             return False
-        if target.exists() and not force:
+        if taken and not force:
             raise _conflict(target, tag) from error
-        raise ReleaseError(f"could not install {tag} into {target}: {error}") from error
+        kept = f"; the previous copy is in {aside}" if aside is not None else ""
+        raise ReleaseError(
+            f"could not install {tag} into {target}: {error}{kept}"
+        ) from error
     if aside is not None:
         shutil.rmtree(aside, ignore_errors=True)
     return True

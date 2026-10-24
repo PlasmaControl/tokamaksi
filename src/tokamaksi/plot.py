@@ -12,6 +12,7 @@ row, so the two differ by shape and not only colour.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -19,11 +20,11 @@ import numpy as np
 import pandas as pd
 
 from . import signals as signals_module
-from .schema import GRID_MS
+from .schema import GRID_MS, TIER_ORDER
 from .taxonomy import Taxonomy
 
-#: Okabe-Ito colours, keyed by category name; any other name takes the next of
-#: `FALLBACK` in the order it is first drawn.
+#: Okabe-Ito colours, keyed by the taxonomy's name of a category (`high`, not the
+#: `high (H)` a producer wrote); a name that is not here takes the next of `FALLBACK`.
 CATEGORY_COLOURS = {
     "present": "#0072B2",
     "uncertain": "#E69F00",
@@ -39,7 +40,9 @@ CATEGORY_COLOURS = {
     # for assessed-and-absent time.
     "absent": "#E3DCCB",
 }
-FALLBACK = ("#CC79A7", "#56B4E9", "#009E73", "#F0E442", "#D55E00", "#E69F00")
+#: For names not above, in the order they are first drawn. None of them is in
+#: `CATEGORY_COLOURS`, so an unknown name never looks like a known category.
+FALLBACK = ("#882255", "#332288", "#117733", "#AA4499", "#999933", "#6E4B2A")
 HATCH_EDGE = "#8C8C8C"
 #: Category names that mean nobody could or did assess the time (the grid makes them
 #: -1); a name containing "not assessed" counts too.
@@ -129,11 +132,19 @@ def _make_rows(
     labels: pd.DataFrame,
     taxonomy: Taxonomy | None,
     rows: Sequence[tuple[str, str]] | None,
+    tiers: Sequence[str] = TIER_ORDER,
 ) -> list[_Row]:
+    """Rows for `rows`, or for every (event, tier) in `labels`: parents before their
+    subcategories, then the tiers in the order of `tiers` (any other after, by name)."""
     if rows is None:
+        order = list(tiers)
         rows = sorted(
             {(e, t) for e, t in zip(labels["event"], labels["tier"])},
-            key=lambda pair: (_order_key(pair[0], taxonomy), pair[1]),
+            key=lambda pair: (
+                _order_key(pair[0], taxonomy),
+                order.index(pair[1]) if pair[1] in order else len(order),
+                pair[1],
+            ),
         )
     out = []
     for event, tier in rows:
@@ -171,8 +182,32 @@ def _tint(colour: str, weight: float = SPAN_TINT) -> tuple[float, float, float]:
     return tuple(weight * c + (1 - weight) for c in to_rgb(colour))
 
 
+_SUFFIX = re.compile(r"\s*\([^()]*\)\s*$")
+
+
+def _colour_name(
+    taxonomy: Taxonomy | None, event: str, category: object, name: str
+) -> str:
+    """The name a category's colour and legend entry go by.
+
+    Producers write names such as `high (H)` or `uncertain (segment below the
+    confidence floor)` where the taxonomy says `high` and `uncertain`: this is the
+    taxonomy's name for the category id, else the row's own name without a trailing
+    parenthesis. (Whether the time was assessed is judged on the row's own name.)
+    """
+    if taxonomy is not None and event in taxonomy:
+        try:
+            known = taxonomy.categories(event).get(int(category))
+        except (TypeError, ValueError):  # a missing category id
+            known = None
+        if known:
+            return known
+    return _SUFFIX.sub("", name) or name
+
+
 class _Colours:
-    """Colour per category name: fixed for the known names, a cycle for the rest."""
+    """Colour per category name: fixed for the known names, the next unused one of
+    `FALLBACK` (then generated ones) for the rest."""
 
     def __init__(self):
         self._extra: dict[str, str] = {}
@@ -181,12 +216,28 @@ class _Colours:
         if name in CATEGORY_COLOURS:
             return CATEGORY_COLOURS[name]
         if name not in self._extra:
-            self._extra[name] = FALLBACK[len(self._extra) % len(FALLBACK)]
+            self._extra[name] = self._next(len(self._extra))
         return self._extra[name]
 
+    @staticmethod
+    def _next(index: int) -> str:
+        if index < len(FALLBACK):
+            return FALLBACK[index]
+        from matplotlib.colors import hsv_to_rgb, to_hex
 
-def _draw_rows(ax, rows: list[_Row], x0: float, x1: float):
-    """Paint the rows on `ax`; returns the legend handles of what was drawn."""
+        # Past the list: golden-ratio hues keep spreading the new ones apart.
+        hue = (0.618033988749895 * index) % 1.0
+        return to_hex(hsv_to_rgb((hue, 0.6, 0.55)))
+
+
+def _draw_rows(
+    ax, rows: list[_Row], x0: float, x1: float, taxonomy: Taxonomy | None = None
+):
+    """Paint the rows on `ax`; returns the legend handles of what was drawn.
+
+    A category is coloured, and listed in the legend, by its taxonomy name (see
+    `_colour_name`), so `high` and `high (H)` are one entry in one colour.
+    """
     _, patches, Line2D = _mpl()
     colour = _Colours()
     minimum = (x1 - x0) / 1500.0  # one pixel on a typical figure
@@ -233,12 +284,13 @@ def _draw_rows(ax, rows: list[_Row], x0: float, x1: float):
                 # Not drawn: the hatch of unassessed time stays visible here.
                 skipped.add(name.strip().lower())
                 continue
-            face = colour(name)
-            drawn[name] = face
+            key = _colour_name(taxonomy, item.event, item.category, name)
+            face = colour(key)
+            drawn[key] = face
             start, stop = float(item.t_start_ms), float(item.t_end_ms)
             width = max(stop - start, minimum)
             kind = item.kind
-            if name != "absent":
+            if key != "absent":
                 kinds.add(kind)
             if kind == "span":
                 # A pale tint, not a transparent fill: the hatch of unassessed time
@@ -309,10 +361,12 @@ def timeline(
 
     rows: the `(event, tier)` pairs to draw, in order; a pair with no labels still
     gets its row, saying so. Default: every pair present, parents before their
-    subcategories. A pair whose labels come from several datasets gets one row per
-    dataset, named after its method and version. Rows whose category says not
-    assessed or not observable are left as hatch. `taxonomy` supplies display names;
-    without it event ids are shown. Returns the Axes; nothing is shown or saved.
+    subcategories, each event's tiers in the order of `schema.TIER_ORDER`. A pair
+    whose labels come from several datasets gets one row per dataset, named after
+    its method and version. Rows whose category says not assessed or not observable
+    are left as hatch. `taxonomy` supplies display names and the category names
+    that colours go by; without it event ids are shown and a category goes by its
+    own name less a trailing parenthesis. Returns the Axes; nothing is shown or saved.
     """
     Figure, _, _ = _mpl()
     if labels["shot"].nunique() > 1:
@@ -324,7 +378,7 @@ def timeline(
             figsize=(10, max(1.6, 0.42 * len(row_list) + 1.0)), layout="constrained"
         )
         ax = figure.subplots()
-    handles = _draw_rows(ax, row_list, float(window[0]), float(window[1]))
+    handles = _draw_rows(ax, row_list, float(window[0]), float(window[1]), taxonomy)
     if legend:
         ax.legend(
             handles=handles,
@@ -349,6 +403,32 @@ def _signal_panel(ax, trace) -> None:
         )
 
 
+def _spec_list(signals) -> list:
+    """`signals` as a list of specs. A tuple is one spec only when it is a
+    `(group, channels)` pair as `signals.parse` takes it (channels None, an int or
+    ints); `("filterscopes:1", "neutron_rate:3")` is two specs."""
+    if signals is None:
+        return []
+    if isinstance(signals, str):
+        return [signals]
+    if isinstance(signals, tuple) and len(signals) == 2 and _is_pair(signals):
+        return [signals]
+    return list(signals)
+
+
+def _is_pair(spec: tuple) -> bool:
+    group, channels = spec
+    if not isinstance(group, str):
+        return False
+    if channels is None or isinstance(channels, (int, np.integer)):
+        return True
+    return (
+        isinstance(channels, (list, tuple, np.ndarray))
+        and len(channels) > 0
+        and all(isinstance(c, (int, np.integer)) for c in channels)
+    )
+
+
 def shot(
     shot: int,
     events: str | Sequence[str] | None = None,
@@ -369,6 +449,7 @@ def shot(
     signals: signal specs to stack above the labels, read from the processed corpus
         (`tokamaksi.signals.parse`: `"neutron_rate:0"`, `"bolo:0,1"`; `corpus=` or
         `$TOKAMAKSI_CORPUS` names the folder; needs `tokamaksi[h5]`).
+    tier: the tier or tiers to draw; each event's rows follow the order given.
     t_range: `(start, stop)` in ms; default the labelled extent plus 2 %.
     Nothing falls back to another tier. The figure is never shown or saved here.
     """
@@ -389,17 +470,13 @@ def shot(
             ((e, t) for e in names for t in tiers),
             key=lambda pair: (_order_key(pair[0], taxonomy), tiers.index(pair[1])),
         )
-    row_list = _make_rows(labels, taxonomy, pairs)
+    row_list = _make_rows(labels, taxonomy, pairs, tiers)
     if not row_list:
         row_list = [
             _Row("", t, f"(no events) [{TIER_TAG.get(t, t)}]", labels) for t in tiers
         ]
     window = t_range or _extent(labels)
-    specs = (
-        []
-        if signals is None
-        else ([signals] if isinstance(signals, (str, tuple)) else list(signals))
-    )
+    specs = _spec_list(signals)
     traces = [
         signals_module.read(
             shot, spec, t_range=window, corpus=corpus, max_points=SIGNAL_POINTS
@@ -423,7 +500,9 @@ def shot(
     )
     for ax, trace in zip(axes[:-1], traces):
         _signal_panel(ax, trace)
-    handles = _draw_rows(axes[-1], row_list, float(window[0]), float(window[1]))
+    handles = _draw_rows(
+        axes[-1], row_list, float(window[0]), float(window[1]), taxonomy
+    )
     figure.legend(handles=handles, loc="outside right upper", fontsize=7, frameon=False)
     figure.suptitle(title or f"shot {int(shot)}  (release {rel.tag})", fontsize=10)
     return figure

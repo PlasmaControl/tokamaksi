@@ -202,3 +202,149 @@ def test_a_present_span_is_not_the_colour_of_absent():
     span = np.array(plot._tint(plot.CATEGORY_COLOURS["present"]))
     absent = np.array(to_rgb(plot.CATEGORY_COLOURS["absent"]))
     assert np.linalg.norm(span - absent) > 0.4
+
+
+def _boxes(ax):
+    """The drawn boxes as {(row from the bottom, start ms): colour}."""
+    return {
+        (round(p.get_y() - 0.1), p.get_x()): to_hex(p.get_facecolor()).lower()
+        for p in ax.patches
+        if not p.get_hatch()
+    }
+
+
+def test_a_producers_suffix_does_not_change_a_category_colour(rel):
+    # 900004: the source table says qh / wpqh, the derived one `qh (QH)` / `wpqh (WPQH)`.
+    fig = plot.shot(900004, ["confinement"], tier=["source", "derived"], release=rel)
+    ax = _label_axes(fig)
+    assert [t.get_text() for t in ax.get_yticklabels()] == [
+        "confinement [src]",
+        "confinement [der]",
+    ]
+    boxes = _boxes(ax)  # the source row is row 1 from the bottom, the derived row 0
+    assert boxes[(1, 900.0)] == boxes[(0, 900.0)] == plot.CATEGORY_COLOURS["qh"].lower()
+    assert (
+        boxes[(1, 1200.0)]
+        == boxes[(0, 1200.0)]
+        == plot.CATEGORY_COLOURS["wpqh"].lower()
+    )
+    assert boxes[(0, 0.0)] == plot.CATEGORY_COLOURS["high"].lower()  # `high (H)`
+    assert boxes[(0, 500.0)] == plot.CATEGORY_COLOURS["low"].lower()  # `low (L)`
+    legend = fig.legends[0]
+    names = [t.get_text() for t in legend.get_texts()]
+    assert names == ["unassessed", "qh", "wpqh", "high", "low", "uncertain"]
+    swatches = [to_hex(p.get_facecolor()).lower() for p in legend.get_patches()[1:]]
+    assert len(set(swatches)) == len(swatches)  # no two entries share a colour
+
+
+@pytest.mark.parametrize(
+    "event, category, name, expected",
+    [
+        ("confinement", 1, "high (H)", "high"),
+        ("confinement", 1, "high", "high"),
+        ("confinement", 4, "wpqh (WPQH)", "wpqh"),
+        (
+            "confinement",
+            5,
+            "uncertain (segment below the confidence floor)",
+            "uncertain",
+        ),
+        ("confinement", 2, "something else", "low"),  # the id decides, not the name
+        ("mystery_event", 1, "high (H)", "high"),  # not in the taxonomy: strip
+        ("confinement", 9, "new class (v2)", "new class"),  # unknown id: strip
+        ("confinement", 9, "plain", "plain"),
+    ],
+)
+def test_colours_go_by_the_taxonomy_name(rel, event, category, name, expected):
+    assert plot._colour_name(rel.taxonomy(), event, category, name) == expected
+
+
+@pytest.mark.parametrize(
+    "name, expected",
+    [("high (H)", "high"), ("marfe (candidate)", "marfe"), ("a (b) (c)", "a (b)")],
+)
+def test_without_a_taxonomy_a_trailing_parenthesis_is_dropped(name, expected):
+    assert plot._colour_name(None, "confinement", 1, name) == expected
+
+
+def test_an_unknown_name_never_takes_a_colour_in_use(rel):
+    fixed = {c.lower() for c in plot.CATEGORY_COLOURS.values()}
+    fallback = [c.lower() for c in plot.FALLBACK]
+    assert len(set(fallback)) == len(fallback) and not set(fallback) & fixed
+    colours = plot._Colours()
+    unknown = [colours(f"mystery {i}") for i in range(len(fallback) + 4)]
+    assert len({c.lower() for c in unknown}) == len(unknown)  # past the list too
+    assert not {c.lower() for c in unknown} & fixed
+    assert colours("mystery 0") == unknown[0]  # the same name keeps its colour
+    # In a figure: two names the taxonomy cannot map beside known ones.
+    labels = tk.load_labels("confinement", tier="derived", shots=900004, release=rel)
+    names = {"wpqh (WPQH)": "zzz (new)", "qh (QH)": "yyy"}
+    labels["category_name"] = labels["category_name"].replace(names)
+    labels["category"] = 99  # no id the taxonomy knows
+    ax = plot.timeline(labels)
+    swatches = [
+        to_hex(p.get_facecolor()).lower() for p in ax.get_legend().get_patches()
+    ]
+    assert len(set(swatches)) == len(swatches)
+
+
+def test_default_rows_follow_the_tier_order_asked(rel):
+    # Alphabetical order of tiers (original, reviewed, source) was the old default.
+    ax = _label_axes(
+        plot.shot(900001, tier=["source", "reviewed", "original"], release=rel)
+    )
+    assert [t.get_text() for t in ax.get_yticklabels()] == [
+        "ELM [src]",
+        "ELM [rev]",
+        "confinement [rev]",
+        "confinement [orig]",
+    ]
+    labels = tk.load_labels(
+        None, tier=["reviewed", "original", "source"], shots=900001, release=rel
+    )
+    plain = plot.timeline(labels, taxonomy=rel.taxonomy())  # no order asked: TIER_ORDER
+    assert [t.get_text() for t in plain.get_yticklabels()] == [
+        "ELM [rev]",
+        "ELM [src]",
+        "confinement [rev]",
+        "confinement [orig]",
+    ]
+
+
+def test_a_tuple_of_two_specs_is_two_specs():
+    assert plot._spec_list(("filterscopes:1", "neutron_rate:3")) == [
+        "filterscopes:1",
+        "neutron_rate:3",
+    ]
+    for pair in (("bolo", 1), ("bolo", [0, 1]), ("bolo", (0, 1)), ("bolo", None)):
+        assert plot._spec_list(pair) == [pair]
+    assert plot._spec_list([("bolo", 1), "neutron_rate:0"]) == [
+        ("bolo", 1),
+        "neutron_rate:0",
+    ]
+    assert plot._spec_list("bolo:0,1") == ["bolo:0,1"]
+    assert plot._spec_list(None) == []
+    assert plot._spec_list(("bolo", ("neutron_rate", 0))) == [
+        "bolo",
+        ("neutron_rate", 0),
+    ]
+
+
+def test_signals_given_as_a_tuple_of_strings_stack(rel, corpus):
+    fig = plot.shot(
+        900001,
+        ["edge_localized_mode"],
+        signals=("bolo:0", "neutron_rate:1"),
+        release=rel,
+        corpus=corpus,
+        t_range=(0, 2000),
+    )
+    assert [ax.get_ylabel() for ax in fig.axes[:2]] == ["bolo[0]", "neutron_rate[1]"]
+    pair = plot.shot(
+        900001,
+        signals=("bolo", [0, 2]),
+        release=rel,
+        corpus=corpus,
+        t_range=(0, 2000),
+    )
+    assert pair.axes[0].get_ylabel() == "bolo[0,2]" and len(pair.axes) == 2

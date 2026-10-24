@@ -5,6 +5,7 @@ import os
 import pytest
 
 import tokamaksi as tk
+from tokamaksi.schema import TIER_ORDER
 
 pytestmark = pytest.mark.real_release
 PATH = os.environ.get("TOKAMAKSI_TEST_RELEASE")
@@ -14,6 +15,9 @@ PATH = os.environ.get("TOKAMAKSI_TEST_RELEASE")
 def test_a_real_release_opens_and_loads():
     rel = tk.open_release(PATH)
     assert rel.check(deep=True) == []
+    on_disk = {p.name for p in (rel.path / "labels").iterdir() if p.is_dir()}
+    assert on_disk and on_disk <= set(TIER_ORDER), on_disk - set(TIER_ORDER)
+    assert set(rel.datasets()["tier"]) <= set(TIER_ORDER)
     for tier in ("reviewed", "original", "derived", "source"):
         df = tk.load_labels("edge_localized_mode", tier=tier, release=rel)
         assert set(df.kind) <= {"span", "individual", "unspecified"}
