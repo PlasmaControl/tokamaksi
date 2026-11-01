@@ -84,3 +84,20 @@ planned, not built.
   what a table says, not how any benchmark scores it. See `docs/schema.md`.
 
 Not here: a labeling UI, model weights, live DIII-D access, the label data itself.
+
+## Citation
+
+If you use these labels or this reader, please cite the paper:
+
+```bibtex
+@misc{chen2026tokamaksi,
+  title         = {Tokamak-SI: Interpreting Tokamak Discharges with Labeled Catalogs},
+  author        = {Chen, Nathaniel and Garcia, Alvin and Shousha, Ricardo and Butt, Jalal and Jalalvand, Azarakhsh and Kolemen, Egemen},
+  year          = {2026},
+  month         = oct,
+  eprint        = {2610.32264},
+  archivePrefix = {arXiv},
+  primaryClass  = {physics.plasm-ph},
+  url           = {https://arxiv.org/abs/2610.32264}
+}
+```
