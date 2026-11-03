@@ -85,6 +85,12 @@ planned, not built.
 
 Not here: a labeling UI, model weights, live DIII-D access, the label data itself.
 
+## Coverage
+
+`coverage/processed.txt` lists the DIII-D shots the labeling pass has processed, as ranges
+over every shot number from 100000 to the latest; a shot skipped on purpose (no plasma, or
+no usable data) counts as processed. `coverage/coverage.ipynb` prints the share.
+
 ## Citation
 
 If you use these labels or this reader, please cite the paper:
