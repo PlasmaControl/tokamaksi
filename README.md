@@ -1,12 +1,12 @@
-# tokamaksi
+# Tokamak-SI
 
 ## Install
 
-    pip install "tokamaksi[plot,h5] @ git+https://github.com/PlasmaControl/tokamaksi.git"
+    pip install "tokamaksi @ git+https://github.com/PlasmaControl/tokamaksi.git"
 
 ## Get the labels
 
-    hf auth login                    # or: export HF_TOKEN=...   (needs read access)
+    hf auth login                    # or: export HF_TOKEN=...   (needs DIII-D and author permission)
     tokamaksi pull v1
     tokamaksi info
 
