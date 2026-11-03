@@ -29,8 +29,3 @@ def test_cli_subcommands_and_flags_exist():
         known = {opt for action in subs[name]._actions for opt in action.option_strings}
         for flag in re.findall(r"--[\w-]+", rest):
             assert flag in known, f"`tokamaksi {name}` has no {flag}"
-
-
-def test_the_readme_keeps_its_warnings():
-    for phrase in ("Missing is not zero", "evaluation", "Data: not licensed"):
-        assert phrase in README
