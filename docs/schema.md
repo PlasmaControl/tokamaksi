@@ -101,6 +101,9 @@ release they are on a 1 ms grid, not 10 ms. A release may ship them as
 reads them from `root=`, else the folder `$TOKAMAKSI_FDP_LABELS` names, else the
 release's `fdp_1ms/`. Under that folder, `<event>/` is the database when it holds
 `meta.json`, else its one subfolder that does; two such subfolders are an error.
+`$TOKAMAKSI_FDP_LABELS` names the published databases, or a verbatim copy of them. It
+never names a producer's working folder or a development run, and nothing deeper than
+`<event>/<name>/` is read.
 
 | file | holds |
 |---|---|
