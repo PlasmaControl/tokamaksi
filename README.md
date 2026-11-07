@@ -33,6 +33,16 @@
     tk.plot.shot(185866, ["edge_localized_mode"], signals=["filterscopes:1", "neutron_rate:3"])
     tokamaksi plot 185866 --events edge_localized_mode --signals filterscopes:1,neutron_rate:3 --out shot.png
 
+## All-shot model labels (1 ms)
+
+    export TOKAMAKSI_FDP_LABELS=<folder holding one folder per event>
+    tk.fdp.events()
+    ae = tk.fdp.open("alfven_eigenmode")        # model output, not reviewed; ae.meta["caveats"]
+    t_ms, codes = ae.decode(121757)             # 1 ms frames: 1 present, 0 absent, -1 outside the assessed window
+    ae.shots; ae.spans; ae.labeled
+    tk.plot.shot(121757, ["alfven_eigenmode"], model=True)
+    tokamaksi plot 121757 --events alfven_eigenmode --model --out shot.png
+
 ## Citation
 
 ```bibtex

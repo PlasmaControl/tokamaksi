@@ -28,7 +28,8 @@ class MissingPartError(TokamaksiError):
 
 
 class NoDataError(TokamaksiError):
-    """A signal is not on disk for this shot, or the diagnostic did not run."""
+    """A signal or a 1 ms label set is not on disk for this shot, or the diagnostic or
+    model did not run on it."""
 
 
 class UnknownEventError(TokamaksiError, ValueError):

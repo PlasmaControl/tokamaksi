@@ -14,10 +14,12 @@ import yaml
 from . import config
 from .errors import OfflineError, ReleaseError, SchemaError
 from .schema import (
+    FDP_DIR,
     RELEASE_SCHEMA_MAX,
     REQUIRED_DIRS,
     REQUIRED_FILES,
     SHOT_COLUMNS,
+    pulled,
     require_columns,
 )
 from .taxonomy import Taxonomy
@@ -139,7 +141,8 @@ class Release:
         """Problems found, as sentences (an empty list is fine); never raises.
 
         Sizes of every present listed file are compared; `deep=True` also compares
-        sha256. A file listed under `tables/` may be absent (it is not fetched).
+        sha256. A listed file that `pull` does not fetch (`tables/`, or a folder
+        newer than this tokamaksi) may be absent.
         """
         problems = []
         for name in REQUIRED_FILES:
@@ -154,7 +157,7 @@ class Release:
         for name, info in sorted(listed.items()):
             path = self.path / name
             if not path.is_file():
-                if not name.startswith("tables/"):
+                if pulled(name):
                     problems.append(f"listed file {name} is missing")
                 continue
             if "bytes" in info and path.stat().st_size != int(info["bytes"]):
@@ -163,7 +166,7 @@ class Release:
                 )
             elif deep and "sha256" in info and _sha256(path) != info["sha256"]:
                 problems.append(f"{name} does not match its sha256")
-        for folder in REQUIRED_DIRS:
+        for folder in (*REQUIRED_DIRS, FDP_DIR):
             for path in sorted((self.path / folder).rglob("*")):
                 relative = path.relative_to(self.path).as_posix()
                 if (

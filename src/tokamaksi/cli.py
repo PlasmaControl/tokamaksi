@@ -54,6 +54,7 @@ def _info(args) -> int:
         print(
             f"grid      {name}: {row.get('shots', '-')} shots, {row.get('runs', '-')} runs"
         )
+    print(f"1 ms      {_fdp_events(rel)}")
     if args.check:
         problems = rel.check(deep=True)
         for problem in problems:
@@ -63,6 +64,17 @@ def _info(args) -> int:
         )
         return 0 if not problems else 2
     return 0
+
+
+def _fdp_events(rel) -> str:
+    """The events with all-shot 1 ms model labels, or why none are found."""
+    from . import fdp
+
+    try:
+        found = fdp.events(release=rel)
+    except TokamaksiError:
+        return "none found (set TOKAMAKSI_FDP_LABELS)"
+    return (", ".join(found) or "none") + " (model output, tokamaksi.fdp)"
 
 
 def _plot(args) -> int:
@@ -78,6 +90,7 @@ def _plot(args) -> int:
         t_range=tuple(args.t_range) if args.t_range else None,
         release=args.release,
         corpus=args.corpus,
+        model=args.model,
     )
     figure.savefig(args.out, dpi=args.dpi)
     print(args.out)
@@ -141,6 +154,11 @@ def build_parser() -> argparse.ArgumentParser:
     plot.add_argument("--release", default=None, help="a tag or a release directory")
     plot.add_argument(
         "--corpus", default=None, help="folder of <shot>_processed.h5 files"
+    )
+    plot.add_argument(
+        "--model",
+        action="store_true",
+        help="add the 1 ms model labels of each event (needs TOKAMAKSI_FDP_LABELS)",
     )
     plot.add_argument("--t-range", nargs=2, type=float, metavar=("START_MS", "STOP_MS"))
     plot.add_argument("--dpi", type=int, default=150)

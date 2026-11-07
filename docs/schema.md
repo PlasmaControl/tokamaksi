@@ -13,9 +13,11 @@ meaning or dtype, does.
     labels/<tier>/<split>.parquet
     grid/<name>.parquet
     shots/<name>.parquet
+    fdp_1ms/<event>/                 (optional: the all-shot 1 ms model labels)
 
 `tables/` (the editable label tables) may exist on the Hub; tokamaksi never fetches
-or reads it. `release.json` lists every file with its size and sha256.
+or reads it. `release.json` lists every file with its size and sha256. A listed file
+that `pull` does not fetch may be absent.
 
 ## Tiers and splits
 
@@ -89,6 +91,34 @@ folded grid row is under the other event.
 split`), `holdout.parquet` (`shot, set, split, events, silver`) and
 `cohort_split.parquet` (`shot, split, gold, holdout`). Named review lists are not in
 the release.
+
+## All-shot model labels (1 ms)
+
+One model per event, run on every DIII-D plasma shot it could read. These tables are
+tier `derived`: model output that nobody reviewed, not labels. Unlike the rest of the
+release they are on a 1 ms grid, not 10 ms. A release may ship them as
+`fdp_1ms/<event>/`; adding them does not change the schema number. `tokamaksi.fdp`
+reads them from `root=`, else the folder `$TOKAMAKSI_FDP_LABELS` names, else the
+release's `fdp_1ms/`. Under that folder, `<event>/` is the database when it holds
+`meta.json`, else its one subfolder that does; two such subfolders are an error.
+
+| file | holds |
+|---|---|
+| `spans.parquet` | `shot, t_start_ms, t_end_ms` (int32): half-open ms ranges where the event is present. `confinement` adds `category` (1 high, 2 low, 3 qh, 4 wpqh, 5 uncertain), `predicted` (the network's class, kept where `category` is uncertain), `confidence` and `tier` |
+| `shots.parquet` | one row per plasma candidate: `status` (`labeled`, or why the shot has none), `plasma_end_ms`, `note`; for labeled shots the assessed window `window_start_ms, window_end_ms` (half-open) and counts. Other columns differ by event |
+| `valid.csv` | `shot, valid`: every shot number of the range, `valid` 1 when the shot has labels |
+| `meta.json` | the model, method, counts, the `statuses` dictionary and the `caveats`; its keys differ by event |
+| `README.md` | a loading snippet |
+
+Inside a labeled shot's window, a ms that no span covers is 0: absent, or for
+`confinement` in no segment (beam-off time, say). Outside the window nothing was
+assessed: `FdpLabels.decode(shot, t_range)` gives `-1` there, as on the 10 ms grid,
+and the plot leaves it hatched. A shot whose status is not `labeled` raises
+`NoDataError` naming the status. `alfven_eigenmode` has a `notch` column (true where
+pickup lines were notched out of the input before the model ran); it is for display,
+never a filter. The producers also write a dense per-shot `grid_1ms/` copy; it holds
+nothing the spans and windows do not, a release leaves it out and tokamaksi never
+reads it.
 
 ## Signals
 

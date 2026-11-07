@@ -88,7 +88,10 @@ SHOT_COLUMNS = {
 #: What `open_release` needs on disk; `tables/` is never fetched or read.
 REQUIRED_FILES = ("release.json", "taxonomy.yaml", "datasets.parquet")
 REQUIRED_DIRS = ("labels", "grid", "shots")
+#: The release folder of the all-shot 1 ms model labels, `fdp_1ms/<event>/`; optional.
+FDP_DIR = "fdp_1ms"
 #: The Hub files `pull` fetches (everything but `tables/`, the editable mirror).
+#: `fdp_1ms/` holds the all-shot 1 ms model labels when a release ships them.
 PULL_PATTERNS = (
     "release.json",
     "taxonomy.yaml",
@@ -99,7 +102,13 @@ PULL_PATTERNS = (
     "labels/**",
     "grid/**",
     "shots/**",
+    f"{FDP_DIR}/**",
 )
+
+
+def pulled(name: str) -> bool:
+    """Whether `pull` fetches the release file `name` (a path relative to the release)."""
+    return name in PULL_PATTERNS or f"{name.split('/', 1)[0]}/**" in PULL_PATTERNS
 
 
 def require_columns(have: Iterable[str], need: Iterable[str], what: str) -> None:

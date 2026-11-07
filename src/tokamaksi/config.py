@@ -60,3 +60,13 @@ def corpus() -> Path | None:
     """
     chosen = os.environ.get("TOKAMAKSI_CORPUS", "").strip()
     return Path(chosen).expanduser() if chosen else None
+
+
+def fdp_labels() -> Path | None:
+    """The folder of the all-shot 1 ms model labels (one `<event>/` folder each):
+    `$TOKAMAKSI_FDP_LABELS`.
+
+    None when unset; tokamaksi ships no default path to any cluster.
+    """
+    chosen = os.environ.get("TOKAMAKSI_FDP_LABELS", "").strip()
+    return Path(chosen).expanduser() if chosen else None

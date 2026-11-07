@@ -61,6 +61,8 @@ NOT_ASSESSED = ("not_observable", "unassessed")
 SPAN_TINT = 0.6
 INK = "#1A1A1A"
 TIER_TAG = {"reviewed": "rev", "original": "orig", "derived": "der", "source": "src"}
+#: The tier tag of a 1 ms model row (`shot(..., model=True)`): model output, not labels.
+MODEL_TAG = "1 ms model"
 #: Signal points drawn per channel: a longer window is thinned to min/max pairs.
 SIGNAL_POINTS = 3000
 
@@ -468,6 +470,72 @@ def timeline(
     return ax
 
 
+def _model_runs(shot: int, db, taxonomy: Taxonomy | None) -> pd.DataFrame:
+    """One shot of a 1 ms database as label-like rows, one per run of equal codes."""
+    from .fdp import BINARY
+
+    t_ms, codes = db.decode(shot)
+    if codes.size == 0:
+        return pd.DataFrame(columns=["t_start_ms", "t_end_ms"])
+    cut = np.flatnonzero(np.diff(codes)) + 1
+    starts, stops = np.r_[0, cut], np.r_[cut, codes.size]
+    names = dict(BINARY if "category" not in db.spans else db.categories)
+    if taxonomy is not None and db.event in taxonomy:
+        names.update(taxonomy.categories(db.event))
+    category = codes[starts].astype(int)
+    return pd.DataFrame(
+        {
+            "shot": int(shot),
+            "event": db.event,
+            "category": category,
+            "category_name": [names.get(c, str(c)) for c in category],
+            "t_start_ms": t_ms[starts].astype(float),
+            "t_end_ms": (t_ms[stops - 1] + 1).astype(float),
+            "tier": "derived",
+            "layer": "model",
+            "kind": "unspecified",
+        }
+    )
+
+
+def _model_rows(
+    shot: int,
+    events: Sequence[str] | None,
+    taxonomy: Taxonomy | None,
+    release,
+) -> list[_Row]:
+    """A 1 ms model row for each of `events` (default every event with a database)
+    that has one; a shot the model did not label gets a row that says so."""
+    from . import fdp
+    from .errors import NoDataError, UnknownEventError
+
+    out = []
+    for event in fdp.events(release=release) if events is None else events:
+        try:
+            db = fdp.open(event, release=release)
+        except (UnknownEventError, NoDataError):
+            continue
+        tag = MODEL_TAG
+        try:
+            frame = _model_runs(shot, db, taxonomy)
+            notch = db.shots.loc[db.shots["shot"] == int(shot)].get("notch")
+            if notch is not None and bool(notch.any()):
+                tag += ", notched"  # display only: never a filter
+        except NoDataError:
+            frame = pd.DataFrame(columns=["t_start_ms", "t_end_ms"])
+        out.append(_Row(event, MODEL_TAG, _row_label(event, tag, taxonomy), frame))
+    return out
+
+
+def _with_model_rows(rows: list[_Row], extra: list[_Row]) -> list[_Row]:
+    """`rows` with each model row placed after the last row of its event."""
+    out = list(rows)
+    for row in extra:
+        last = max((i for i, r in enumerate(out) if r.event == row.event), default=None)
+        out.insert(len(out) if last is None else last + 1, row)
+    return out
+
+
 def _signal_panel(ax, trace) -> None:
     many = trace.y.shape[0] > 1
     for row, channel in zip(trace.y, trace.channels):
@@ -519,6 +587,7 @@ def shot(
     corpus: str | os.PathLike | None = None,
     figsize: tuple[float, float] | None = None,
     title: str | None = None,
+    model: bool = False,
 ):
     """One shot as signal panels over its label timeline; returns a matplotlib Figure.
 
@@ -529,6 +598,10 @@ def shot(
         `$TOKAMAKSI_CORPUS` names the folder; needs `tokamaksi[h5]`).
     tier: the tier or tiers to draw; each event's rows follow the order given.
     t_range: `(start, stop)` in ms; default the labelled extent plus 2 %.
+    model: also draw the all-shot 1 ms model labels (`tokamaksi.fdp`) of each event
+        that has them, one row tagged `[1 ms model]` under the event's labels. They
+        are model output, not labels. Needs `$TOKAMAKSI_FDP_LABELS` or a release
+        that ships `fdp_1ms/`.
     Nothing falls back to another tier. The figure is never shown or saved here.
     """
     from .labels import load_labels
@@ -549,11 +622,17 @@ def shot(
             key=lambda pair: (_order_key(pair[0], taxonomy), tiers.index(pair[1])),
         )
     row_list = _make_rows(labels, taxonomy, pairs, tiers)
+    extra = []
+    if model:
+        names = [events] if isinstance(events, str) else events
+        extra = _model_rows(shot, names, taxonomy, rel)
+        row_list = _with_model_rows(row_list, extra)
     if not row_list:
         row_list = [
             _Row("", t, f"(no events) [{TIER_TAG.get(t, t)}]", labels) for t in tiers
         ]
-    window = t_range or _extent(labels)
+    drawn = [f for f in (labels, *(row.frame for row in extra)) if not f.empty]
+    window = t_range or (_extent(pd.concat(drawn)) if drawn else None)
     specs = _spec_list(signals)
     for spec in specs:
         signals_module.parse(spec)  # a malformed spec fails before any file is read

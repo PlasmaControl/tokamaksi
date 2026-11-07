@@ -8,7 +8,7 @@ __version__ = "0.1.0"
 #: The release schema this version reads (see docs/schema.md).
 RELEASE_SCHEMA = 1
 
-from . import config, hf, shotlists, signals  # noqa: E402
+from . import config, fdp, hf, shotlists, signals  # noqa: E402
 from .errors import (  # noqa: E402
     AccessError,
     MissingPartError,
@@ -42,6 +42,7 @@ __all__ = [
     "UnknownEventError",
     "at",
     "config",
+    "fdp",
     "hf",
     "individuals",
     "load_grid",

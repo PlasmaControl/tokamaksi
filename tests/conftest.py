@@ -20,6 +20,7 @@ def _clean_env(monkeypatch, tmp_path):
         "TOKAMAKSI_REPO",
         "TOKAMAKSI_OFFLINE",
         "TOKAMAKSI_CORPUS",
+        "TOKAMAKSI_FDP_LABELS",
         "HF_HUB_OFFLINE",
     ):
         monkeypatch.delenv(name, raising=False)
