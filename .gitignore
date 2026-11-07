@@ -237,3 +237,6 @@ __marimo__/
 /hf_cache/
 .tokamaksi.json
 !src/tokamaksi/data/
+
+# internal cluster notes, never tracked
+/stellar/
