@@ -73,7 +73,7 @@ painting them.
 `grid/<name>.parquet` holds runs: `shot, event, frame, n_frames, t_start_ms,
 t_end_ms, category, tier, layer, dataset, split`. A run covers frames
 `[frame, frame + n_frames)`, each `[10 k, 10 k + 10)` ms. `load_grid(name).decode(shot)`
-fills a `(events, frames)` int8 array with `-1` where no run applies. v1 ships `gold`
+fills a `(events, frames)` int8 array with `-1` where no run applies. v0.2.1 ships `gold`
 (split `test`) and `silver`; a release without a grid raises `MissingPartError`
 naming the ones it has.
 

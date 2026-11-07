@@ -141,7 +141,7 @@ def pull(
     complete release another process installs meanwhile is kept instead). A
     folder in the way that holds no `release.json` is not a release: an empty one is
     replaced, any other raises `ReleaseError` unless `force`. Everything but the
-    `tables/` mirror is fetched (about 20 MB for v1).
+    `tables/` mirror is fetched (about 30 MB for v0.2.1).
     """
     from . import __version__
     from .release import _OPEN, Release

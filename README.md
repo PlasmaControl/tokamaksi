@@ -7,7 +7,7 @@
 ## Get the labels
 
     hf auth login                    # or: export HF_TOKEN=...   (needs DIII-D and author permission)
-    tokamaksi pull v1
+    tokamaksi pull v0.2.1
     tokamaksi info
 
 ## Use

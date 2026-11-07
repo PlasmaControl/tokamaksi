@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 #: The release a bare `open_release()` opens: the one this version was cut against.
-DEFAULT_RELEASE = "v1"
+DEFAULT_RELEASE = "v0.2.1"
 #: The private dataset on the Hugging Face Hub.
 DEFAULT_REPO = "nc1/tokamak-si"
 

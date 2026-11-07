@@ -97,8 +97,8 @@ def load_grid(
     which: str = "gold", *, release: str | os.PathLike | Release | None = None
 ) -> Grid:
     """The 10 ms grid runs of `which`: `"gold"` (split `test`, evaluation only) or
-    `"silver"`. `MissingPartError` names the grids the release has (v1 ships gold
-    and silver only)."""
+    `"silver"`. `MissingPartError` names the grids the release has (v0.2.1 ships
+    gold and silver only)."""
     rel = open_release(release)
     path = rel.path / "grid" / f"{which}.parquet"
     if not path.is_file():
