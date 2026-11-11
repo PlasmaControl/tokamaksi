@@ -5,23 +5,25 @@ build-backend = "hatchling.build"
 [project]
 name = "tokamaksi"
 dynamic = ["version"]
-description = "Read the Tokamak-SI DIII-D event labels and plot them on a shot"
+description = "Read Tokamak-SI event labels"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 dependencies = [
-  "numpy>=1.26",
-  "pandas>=2.2",
-  "pyarrow>=17",
-  "pyyaml>=6",
-  "huggingface_hub>=0.34,<2",  # 0.34 brought the `hf` CLI (`hf auth login`)
+  "numpy,
+  "pandas,
+  "pyarrow,
+  "pyyaml,
+  "huggingface_hub
+  "ipykernel",
+  "ipywidgets",
 ]
 
 [project.optional-dependencies]
-plot = ["matplotlib>=3.8"]
-h5 = ["h5py>=3.10"]
+plot = ["matplotlib]
+h5 = ["h5py]
 test = ["pytest>=8", "ruff"]
-# fdp, toksearch and toksearch_d3d are not extras: they come from the conda channel
+# fdp, toksearch and toksearch_d3d come from the conda channel
 # `ga-fdp` and are imported lazily (live fetching is milestone 2).
 
 [project.scripts]
