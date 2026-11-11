@@ -20,8 +20,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-plot = ["matplotlib]
-h5 = ["h5py]
+plot = ["matplotlib"]
+h5 = ["h5py"]
 test = ["pytest>=8", "ruff"]
 # fdp, toksearch and toksearch_d3d come from the conda channel
 # `ga-fdp` and are imported lazily (live fetching is milestone 2).
