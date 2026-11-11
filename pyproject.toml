@@ -10,11 +10,11 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 dependencies = [
-  "numpy,
-  "pandas,
-  "pyarrow,
-  "pyyaml,
-  "huggingface_hub
+  "numpy",
+  "pandas",
+  "pyarrow",
+  "pyyaml",
+  "huggingface_hub",
   "ipykernel",
   "ipywidgets",
 ]
